@@ -1,7 +1,7 @@
 name: whitelist_monitor
 description: "Offline-first network restriction tracker and whitelist detector"
 publish_to: "none"
-version: 1.2.0+3
+version: 2.0.0+4
 
 environment:
   sdk: ">=3.0.0 <4.0.0"
@@ -11,8 +11,8 @@ dependencies:
     sdk: flutter
   http: ^1.2.0
   provider: ^6.1.1
-  flutter_map: ^7.0.2
-  latlong2: ^0.9.1
+  flutter_local_notifications: ^17.2.1
+  shared_preferences: ^2.2.3
 
 flutter:
   uses-material-design: true
