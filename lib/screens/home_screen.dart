@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
@@ -16,16 +17,17 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   late List<RegionInfo> _regions;
   String? _savedCity;
   RegionInfo? _myRegion;
   bool _liveAlertsEnabled = true;
   String _searchQuery = "";
+  Timer? _liveMonitorTimer;
 
-  late AnimationController _animController;
-  late Animation<double> _fadeAnim;
-  late Animation<Offset> _slideAnim;
+  late AnimationController _entryController;
+  late Animation<double> _fadeAnimation;
+  late Animation<Offset> _slideAnimation;
 
   final String _serverUrl = "http://64.188.64.121:8080";
 
@@ -33,52 +35,85 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   void initState() {
     super.initState();
     _regions = RegionsDatabase.getInitialRegions();
-    _initAnimation();
+    _initAnimations();
     _loadUserCity();
+    _startLiveBackgroundMonitor();
   }
 
   @override
   void dispose() {
-    _animController.dispose();
+    _entryController.dispose();
+    _liveMonitorTimer?.cancel();
     super.dispose();
   }
 
-  void _initAnimation() {
-    _animController = AnimationController(
+  void _initAnimations() {
+    _entryController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 900),
+      duration: const Duration(milliseconds: 650),
     );
-    _fadeAnim = CurvedAnimation(parent: _animController, curve: Curves.easeOut);
-    _slideAnim = Tween<Offset>(begin: const Offset(0, 0.08), end: Offset.zero).animate(
-      CurvedAnimation(parent: _animController, curve: Curves.easeOutCubic),
+    _fadeAnimation = CurvedAnimation(parent: _entryController, curve: Curves.easeOut);
+    _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(
+      CurvedAnimation(parent: _entryController, curve: Curves.easeOutCubic),
     );
-    _animController.forward();
+    _entryController.forward();
   }
 
-  void _triggerLiveAlert(String title, String message) {
-    if (!_liveAlertsEnabled) return;
+  // Запрос системного разрешения Android 13+ на пуши через платформенный канал
+  Future<void> _requestNotificationPermission() async {
+    try {
+      const platform = MethodChannel('dexterx.dev/flutter_local_notifications_plugin');
+      await platform.invokeMethod('requestNotificationsPermission');
+    } catch (_) {
+      // Платформа обработает нативно или через настройки
+    }
+  }
+
+  // Фоновый монитор: каждые 45 секунд проверяет изменение статуса и бьет тревогу
+  void _startLiveBackgroundMonitor() {
+    _liveMonitorTimer = Timer.periodic(const Duration(seconds: 45), (_) async {
+      if (!_liveAlertsEnabled || !mounted) return;
+      final detector = Provider.of<NetworkDetectorService>(context, listen: false);
+      final prev = detector.localStatus;
+      await detector.runDiagnostics();
+      if (prev != detector.localStatus) {
+        _triggerNotificationOverlay(
+          "Внимание! Изменение статуса сети",
+          "В г. ${_savedCity ?? 'вашем регионе'} зафиксирован: ${_getStatusText(detector.localStatus)}",
+        );
+      }
+    });
+  }
+
+  void _triggerNotificationOverlay(String title, String message) {
+    if (!mounted) return;
     HapticFeedback.heavyImpact();
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF131A26),
+        backgroundColor: const Color(0xFF141A26),
         behavior: SnackBarBehavior.floating,
-        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 24),
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(16),
+          borderRadius: BorderRadius.circular(18),
           side: const BorderSide(color: Color(0xFFFF3366), width: 1.5),
         ),
-        duration: const Duration(seconds: 5),
+        duration: const Duration(seconds: 6),
         content: Row(
           children: [
-            const Icon(Icons.warning_amber_rounded, color: Color(0xFFFF3366), size: 24),
-            const SizedBox(width: 12),
+            Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(color: const Color(0xFFFF3366).withOpacity(0.15), shape: BoxShape.circle),
+              child: const Icon(Icons.warning_amber_rounded, color: Color(0xFFFF3366), size: 24),
+            ),
+            const SizedBox(width: 14),
             Expanded(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
-                  Text(message, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                  const SizedBox(height: 2),
+                  Text(message, style: TextStyle(color: Colors.white.withOpacity(0.75), fontSize: 12)),
                 ],
               ),
             ),
@@ -117,7 +152,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         break;
       }
     }
-
     matched ??= _regions.first;
 
     setState(() {
@@ -160,8 +194,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           SnackBar(
             backgroundColor: const Color(0xFF00FFA3),
             behavior: SnackBarBehavior.floating,
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text("Отчёт по $city зафиксирован на сервере!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+            content: Text("Отчёт по г. $city отправлен на сервер!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         );
       }
@@ -171,8 +205,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
         SnackBar(
           backgroundColor: const Color(0xFF1E2638),
           behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Text("Сервер временно недоступен. Отчёт сохранён локально."),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+          content: Text("Сервер временно недоступен. Отчёт по $city сохранён локально."),
         ),
       );
     }
@@ -198,7 +232,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           final filtered = searchList.where((item) => item["city"]!.toLowerCase().contains(query) || item["region"]!.toLowerCase().contains(query)).toList();
 
           return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
             child: Container(
               height: MediaQuery.of(context).size.height * 0.78,
               padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
@@ -210,9 +244,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Center(
-                    child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10))),
-                  ),
+                  Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
                   const SizedBox(height: 18),
                   Text(
                     isFirstRun ? "👋 В каком городе вы находитесь?" : "📍 Выбор вашего города",
@@ -220,7 +252,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    "Приложение настроит персональный радар изоляции сети под ваш населённый пункт",
+                    "Приложение настроит мониторинг под ваш населённый пункт",
                     style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
                   ),
                   const SizedBox(height: 16),
@@ -228,7 +260,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     height: 48,
                     decoration: BoxDecoration(
                       color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(16),
+                      borderRadius: BorderRadius.circular(14),
                       border: Border.all(color: Colors.white.withOpacity(0.1)),
                     ),
                     child: TextField(
@@ -237,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                       onChanged: (_) => setSheetState(() {}),
                       decoration: InputDecoration(
-                        hintText: "Поиск: Кубинка, Москва, Белгород, Курск...",
+                        hintText: "Поиск: Кубинка, Москва, Белгород...",
                         hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
                         prefixIcon: const Icon(Icons.search, color: Color(0xFF00FFA3), size: 20),
                         border: InputBorder.none,
@@ -288,7 +320,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (ctx) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
         child: Container(
           padding: const EdgeInsets.all(26),
           decoration: BoxDecoration(
@@ -371,44 +403,29 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       backgroundColor: const Color(0xFF070A0F),
       body: Stack(
         children: [
-          Positioned(
-            top: -100,
-            right: -80,
-            child: Container(
-              width: 340,
-              height: 340,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [myColor.withOpacity(0.22), Colors.transparent],
+          // Оптимизированный неоновый фон
+          RepaintBoundary(
+            child: Positioned(
+              top: -80,
+              right: -60,
+              child: Container(
+                width: 300,
+                height: 300,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  gradient: RadialGradient(colors: [myColor.withOpacity(0.16), Colors.transparent]),
                 ),
               ),
             ),
           ),
-          Positioned(
-            top: 280,
-            left: -120,
-            child: Container(
-              width: 360,
-              height: 360,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                gradient: RadialGradient(
-                  colors: [const Color(0xFF0075FF).withOpacity(0.12), Colors.transparent],
-                ),
-              ),
-            ),
-          ),
-          BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
-            child: Container(color: Colors.transparent),
-          ),
+
           SafeArea(
             child: FadeTransition(
-              opacity: _fadeAnim,
+              opacity: _fadeAnimation,
               child: SlideTransition(
-                position: _slideAnim,
+                position: _slideAnimation,
                 child: ListView(
+                  physics: const BouncingScrollPhysics(),
                   padding: const EdgeInsets.fromLTRB(20, 14, 20, 40),
                   children: [
                     _buildTopHeader(),
@@ -416,7 +433,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     _buildPrimaryCityCard(cityTitle, myReg, myColor, detector),
                     const SizedBox(height: 14),
                     _buildQuickActionGrid(myReg, cityTitle),
-                    const SizedBox(height: 16),
+                    const SizedBox(height: 14),
                     _buildLiveAlertToggle(),
                     const SizedBox(height: 24),
                     _buildRegionsSectionHeader(),
@@ -455,13 +472,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                 const SizedBox(width: 8),
                 Text(
                   "WHITELIST RADAR // РФ",
-                  style: TextStyle(
-                    fontFamily: 'monospace',
-                    fontSize: 11,
-                    letterSpacing: 2.2,
-                    color: Colors.white.withOpacity(0.55),
-                    fontWeight: FontWeight.w700,
-                  ),
+                  style: TextStyle(fontFamily: 'monospace', fontSize: 11, letterSpacing: 2.2, color: Colors.white.withOpacity(0.55), fontWeight: FontWeight.w700),
                 ),
               ],
             ),
@@ -473,29 +484,23 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           ],
         ),
         GestureDetector(
-          onTap: () => _showCitySelectDialog(isFirstRun: false),
-          child: ClipRRect(
-            borderRadius: BorderRadius.circular(16),
-            child: BackdropFilter(
-              filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.05),
-                  borderRadius: BorderRadius.circular(16),
-                  border: Border.all(color: Colors.white.withOpacity(0.12)),
-                  boxShadow: [
-                    BoxShadow(color: Colors.black.withOpacity(0.2), blurRadius: 10, offset: const Offset(0, 4)),
-                  ],
-                ),
-                child: const Row(
-                  children: [
-                    Icon(Icons.location_on_outlined, color: Color(0xFF00FFA3), size: 16),
-                    SizedBox(width: 6),
-                    Text("Сменить", style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
-                  ],
-                ),
-              ),
+          onTap: () {
+            HapticFeedback.lightImpact();
+            _showCitySelectDialog(isFirstRun: false);
+          },
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: Colors.white.withOpacity(0.05),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: Colors.white.withOpacity(0.1)),
+            ),
+            child: const Row(
+              children: [
+                Icon(Icons.location_on_outlined, color: Color(0xFF00FFA3), size: 16),
+                SizedBox(width: 6),
+                Text("Сменить", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+              ],
             ),
           ),
         ),
@@ -503,181 +508,178 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  // Главная супер-карточка
   Widget _buildPrimaryCityCard(String city, RegionInfo reg, Color statusColor, NetworkDetectorService detector) {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(26),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
-        child: Container(
-          padding: const EdgeInsets.all(22),
-          decoration: BoxDecoration(
-            color: const Color(0xFF101724).withOpacity(0.72),
-            borderRadius: BorderRadius.circular(26),
-            border: Border.all(color: statusColor.withOpacity(0.35), width: 1.5),
-            boxShadow: [
-              BoxShadow(color: statusColor.withOpacity(0.18), blurRadius: 35, spreadRadius: -5, offset: const Offset(0, 10)),
-              BoxShadow(color: Colors.black.withOpacity(0.5), blurRadius: 20, offset: const Offset(0, 8)),
-            ],
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+    return Container(
+      padding: const EdgeInsets.all(22),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F1522).withOpacity(0.85),
+        borderRadius: BorderRadius.circular(26),
+        border: Border.all(color: statusColor.withOpacity(0.35), width: 1.5),
+        boxShadow: [
+          BoxShadow(color: statusColor.withOpacity(0.16), blurRadius: 28, spreadRadius: -4, offset: const Offset(0, 8)),
+          BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 16, offset: const Offset(0, 6)),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.15),
-                      borderRadius: BorderRadius.circular(8),
-                      border: Border.all(color: statusColor.withOpacity(0.3)),
-                    ),
-                    child: Row(
-                      children: [
-                        Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
-                        const SizedBox(width: 6),
-                        Text(
-                          _getStatusText(reg.level).toUpperCase(),
-                          style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.5),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Text("РЕГИОН ${reg.id}", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                city,
-                style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -0.8),
-              ),
-              Text(
-                reg.name,
-                style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14, fontWeight: FontWeight.w500),
-              ),
-              const SizedBox(height: 16),
               Container(
-                padding: const EdgeInsets.all(12),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.25),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: Colors.white.withOpacity(0.06)),
+                  color: statusColor.withOpacity(0.15),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: statusColor.withOpacity(0.3)),
                 ),
                 child: Row(
                   children: [
-                    Icon(Icons.wifi_tethering, color: statusColor, size: 20),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        reg.comment,
-                        style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3),
-                      ),
+                    Container(width: 6, height: 6, decoration: BoxDecoration(color: statusColor, shape: BoxShape.circle)),
+                    const SizedBox(width: 6),
+                    Text(
+                      _getStatusText(reg.level).toUpperCase(),
+                      style: TextStyle(color: statusColor, fontSize: 11, fontWeight: FontWeight.w900, letterSpacing: 0.5),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 18),
-              SizedBox(
-                width: double.infinity,
-                height: 46,
-                child: ElevatedButton(
-                  onPressed: detector.isChecking ? null : () async {
-                    HapticFeedback.lightImpact();
-                    final prevStatus = detector.localStatus;
-                    await detector.runDiagnostics();
-                    if (prevStatus != detector.localStatus) {
-                      _triggerLiveAlert(
-                        "Изменение статуса сети",
-                        "Текущий режим: ${_getStatusText(detector.localStatus)}",
-                      );
-                    }
-                  },
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.white.withOpacity(0.08),
-                    foregroundColor: Colors.white,
-                    elevation: 0,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                      side: BorderSide(color: Colors.white.withOpacity(0.14)),
-                    ),
-                  ),
-                  child: detector.isChecking
-                      ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Row(
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Icon(Icons.bolt_outlined, size: 18, color: Color(0xFF00FFA3)),
-                            SizedBox(width: 8),
-                            Text("Проверить текущее сотовое соединение", style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold)),
-                          ],
-                        ),
-                ),
-              ),
+              Text("РЕГИОН ${reg.id}", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12, fontFamily: 'monospace', fontWeight: FontWeight.bold)),
             ],
           ),
-        ),
+          const SizedBox(height: 14),
+          Text(city, style: const TextStyle(color: Colors.white, fontSize: 32, fontWeight: FontWeight.w900, letterSpacing: -0.8)),
+          Text(reg.name, style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 14, fontWeight: FontWeight.w500)),
+          const SizedBox(height: 16),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+            decoration: BoxDecoration(
+              color: Colors.black.withOpacity(0.25),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: Colors.white.withOpacity(0.06)),
+            ),
+            child: Row(
+              children: [
+                Icon(Icons.wifi_tethering, color: statusColor, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(reg.comment, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3)),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          SizedBox(
+            width: double.infinity,
+            height: 48,
+            child: ElevatedButton(
+              onPressed: detector.isChecking ? null : () async {
+                HapticFeedback.lightImpact();
+                final prevStatus = detector.localStatus;
+                await detector.runDiagnostics();
+                if (prevStatus != detector.localStatus && _liveAlertsEnabled) {
+                  _triggerNotificationOverlay(
+                    "Изменение режима сети",
+                    "Текущий статус в вашем городе: ${_getStatusText(detector.localStatus)}",
+                  );
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.white.withOpacity(0.08),
+                foregroundColor: Colors.white,
+                elevation: 0,
+                padding: const EdgeInsets.symmetric(horizontal: 16),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(14),
+                  side: BorderSide(color: Colors.white.withOpacity(0.12)),
+                ),
+              ),
+              child: detector.isChecking
+                  ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                  : const Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: [
+                        Icon(Icons.bolt_outlined, size: 18, color: Color(0xFF00FFA3)),
+                        SizedBox(width: 8),
+                        Flexible(
+                          child: Text(
+                            "Проверить сотовую связь",
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+            ),
+          ),
+        ],
       ),
     );
   }
 
+  // Одинаковые ровные карточки действий
   Widget _buildQuickActionGrid(RegionInfo reg, String city) {
     return Row(
       children: [
         Expanded(
           child: GestureDetector(
-            onTap: _showSosHelpSheet,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF121824).withOpacity(0.65),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: Colors.white.withOpacity(0.08)),
-                  ),
-                  child: const Column(
+            onTap: () {
+              HapticFeedback.lightImpact();
+              _showSosHelpSheet();
+            },
+            child: Container(
+              height: 105, // Фиксированная одинаковая высота!
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFF101622).withOpacity(0.7),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: Colors.white.withOpacity(0.08)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(Icons.health_and_safety_outlined, color: Color(0xFF00FFA3), size: 22),
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.health_and_safety_outlined, color: Color(0xFF00FFA3), size: 22),
-                      SizedBox(height: 8),
                       Text("Памятка SOS", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                       SizedBox(height: 2),
                       Text("Что работает в блоке", style: TextStyle(color: Colors.white38, fontSize: 11)),
                     ],
                   ),
-                ),
+                ],
               ),
             ),
           ),
         ),
-        const SizedBox(width: 10),
+        const SizedBox(width: 12),
         Expanded(
           child: GestureDetector(
             onTap: () => _sendReportToServer(reg, city),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(18),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFFF3366).withOpacity(0.08),
-                    borderRadius: BorderRadius.circular(18),
-                    border: Border.all(color: const Color(0xFFFF3366).withOpacity(0.25)),
-                  ),
-                  child: const Column(
+            child: Container(
+              height: 105, // Фиксированная одинаковая высота!
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: const Color(0xFFFF3366).withOpacity(0.08),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: const Color(0xFFFF3366).withOpacity(0.25)),
+              ),
+              child: const Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Icon(Icons.notification_important_outlined, color: Color(0xFFFF3366), size: 22),
+                  Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Icon(Icons.notification_important_outlined, color: Color(0xFFFF3366), size: 22),
-                      SizedBox(height: 8),
                       Text("Сообщить о глушилке", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                       SizedBox(height: 2),
                       Text("Зафиксировать в базе", style: TextStyle(color: Colors.white38, fontSize: 11)),
                     ],
                   ),
-                ),
+                ],
               ),
             ),
           ),
@@ -686,49 +688,51 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
+  // Переключатель Live-информирования
   Widget _buildLiveAlertToggle() {
-    return ClipRRect(
-      borderRadius: BorderRadius.circular(18),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 15, sigmaY: 15),
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          decoration: BoxDecoration(
-            color: const Color(0xFF101622).withOpacity(0.65),
-            borderRadius: BorderRadius.circular(18),
-            border: Border.all(color: Colors.white.withOpacity(0.07)),
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      decoration: BoxDecoration(
+        color: const Color(0xFF101622).withOpacity(0.7),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withOpacity(0.07)),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Row(
             children: [
-              Row(
+              Icon(Icons.notifications_active_outlined, color: _liveAlertsEnabled ? const Color(0xFF00FFA3) : Colors.white38, size: 20),
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Icon(Icons.notifications_active_outlined, color: _liveAlertsEnabled ? const Color(0xFF00FFA3) : Colors.white38, size: 20),
-                  const SizedBox(width: 12),
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text("Live-информирование", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
-                      Text("Предупреждать при смене статуса сети", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
-                    ],
-                  ),
+                  const Text("Live-информирование", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                  Text("Предупреждать при смене статуса сети", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
                 ],
-              ),
-              Switch(
-                value: _liveAlertsEnabled,
-                activeColor: const Color(0xFF00FFA3),
-                activeTrackColor: const Color(0xFF00FFA3).withOpacity(0.2),
-                inactiveThumbColor: Colors.white38,
-                inactiveTrackColor: Colors.white10,
-                onChanged: (val) async {
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool("live_alerts_enabled", val);
-                  setState(() => _liveAlertsEnabled = val);
-                },
               ),
             ],
           ),
-        ),
+          Switch(
+            value: _liveAlertsEnabled,
+            activeColor: const Color(0xFF00FFA3),
+            activeTrackColor: const Color(0xFF00FFA3).withOpacity(0.2),
+            inactiveThumbColor: Colors.white38,
+            inactiveTrackColor: Colors.white10,
+            onChanged: (val) async {
+              HapticFeedback.lightImpact();
+              if (val) {
+                await _requestNotificationPermission();
+              }
+              final prefs = await SharedPreferences.getInstance();
+              await prefs.setBool("live_alerts_enabled", val);
+              setState(() => _liveAlertsEnabled = val);
+              if (val) {
+                _triggerNotificationOverlay("Live-мониторинг активен", "Сеть сканируется в фоновом режиме");
+              }
+            },
+          ),
+        ],
       ),
     );
   }
@@ -772,7 +776,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF101622).withOpacity(0.45),
+        color: const Color(0xFF101622).withOpacity(0.5),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withOpacity(0.04)),
       ),
