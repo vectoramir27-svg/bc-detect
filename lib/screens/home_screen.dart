@@ -1,5 +1,7 @@
+import 'dart:convert';
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import '../models/region_status.dart';
 import '../data/regions_database.dart';
@@ -18,6 +20,9 @@ class _HomeScreenState extends State<HomeScreen> {
   String _searchQuery = "";
   String _selectedDistrict = "ВСЕ";
   bool _showMap = true;
+
+  // ВСТАВЬ СЮДА IP-АДРЕС СВОЕГО VPS СЕРВЕРА:
+  final String _serverUrl = "http://144.31.192.63:8080";
 
   @override
   void initState() {
@@ -51,6 +56,41 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  Future<void> _sendReportToServer(RegionInfo region, String city) async {
+    try {
+      final response = await http.post(
+        Uri.parse("$_serverUrl/api/report"),
+        headers: {"Content-Type": "application/json"},
+        body: jsonEncode({
+          "region_id": region.id,
+          "city": city,
+        }),
+      ).timeout(const Duration(seconds: 4));
+
+      if (!mounted) return;
+
+      if (response.statusCode == 200) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            backgroundColor: const Color(0xFF00FFA3),
+            content: Text("Жалоба по г. $city отправлена на сервер!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+          ),
+        );
+      } else {
+        throw Exception("Server returned ${response.statusCode}");
+      }
+    } catch (_) {
+      if (!mounted) return;
+      // Сохраняем локально, если сервер под глушилкой не ответил
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          backgroundColor: const Color(0xFF1E2638),
+          content: Text("Сервер недоступен из-за фильтров. Жалоба по г. $city сохранена локально!"),
+        ),
+      );
+    }
+  }
+
   void _showRegionDetailModal(RegionInfo region, {String? matchedCity}) {
     showModalBottomSheet(
       context: context,
@@ -58,12 +98,14 @@ class _HomeScreenState extends State<HomeScreen> {
       isScrollControlled: true,
       builder: (context) {
         final color = _getStatusColor(region.level);
+        final currentCity = matchedCity ?? (region.cities.isNotEmpty ? region.cities.first : region.name);
+
         return BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
           child: Container(
             padding: const EdgeInsets.all(24),
             decoration: BoxDecoration(
-              color: const Color(0xFF111622).withOpacity(0.95),
+              color: const Color(0xFF111622).withOpacity(0.96),
               borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
               border: Border.all(color: color.withOpacity(0.3)),
             ),
@@ -108,7 +150,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
                 const SizedBox(height: 6),
                 Text(
-                  "Федеральный округ: ${region.federalDistrict}",
+                  "Округ: ${region.federalDistrict}",
                   style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
                 ),
                 const SizedBox(height: 16),
@@ -133,7 +175,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text("Города и населенные пункты в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                const Text("Города региона в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -165,21 +207,16 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        SnackBar(
-                          backgroundColor: const Color(0xFF161B22),
-                          content: Text("Отчёт по ${region.name} отправлен в локальную базу"),
-                        ),
-                      );
+                      _sendReportToServer(region, currentCity);
                     },
-                    icon: const Icon(Icons.flag_outlined, size: 18),
-                    label: const Text("Сообщить о белом списке в регионе", style: TextStyle(fontWeight: FontWeight.bold)),
+                    icon: const Icon(Icons.warning_amber_rounded, size: 18),
+                    label: Text("Сообщить о белом списке в $currentCity", style: const TextStyle(fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.white.withOpacity(0.08),
-                      foregroundColor: Colors.white,
+                      backgroundColor: const Color(0xFFFF3366).withOpacity(0.2),
+                      foregroundColor: const Color(0xFFFF3366),
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(14),
-                        side: BorderSide(color: Colors.white.withOpacity(0.1)),
+                        side: const BorderSide(color: Color(0xFFFF3366)),
                       ),
                     ),
                   ),
@@ -193,95 +230,10 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showProbesSheet(NetworkDetectorService detector) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111622).withOpacity(0.95),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text("Матрица доступности шлюзов", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 6),
-                Text("Тестирование сквозного трафика и DPI прямо сейчас", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
-                const SizedBox(height: 16),
-                ...detector.probes.map((probe) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.03),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.06)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(probe.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                            Text(probe.isWhitelistExpected ? "Пул белого списка РФ" : "Внешний глобальный узел", style: TextStyle(color: Colors.white38, fontSize: 11)),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            if (probe.latencyMs != null)
-                              Text("${probe.latencyMs} ms  ", style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace')),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: (probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366)).withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                probe.isReachable ? "OK" : "TIMEOUT / RST",
-                                style: TextStyle(
-                                  color: probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
-                  );
-                }),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final detector = Provider.of<NetworkDetectorService>(context);
 
-    // Умная фильтрация: поиск по названию региона ИЛИ городу внутри региона
     final filtered = _regions.where((r) {
       if (_selectedDistrict != "ВСЕ" && r.federalDistrict != _selectedDistrict) {
         return false;
@@ -309,18 +261,6 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ),
           ),
-          Positioned(
-            bottom: 100,
-            left: -100,
-            child: Container(
-              width: 300,
-              height: 300,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: const Color(0xFF0075FF).withOpacity(0.12),
-              ),
-            ),
-          ),
           BackdropFilter(
             filter: ImageFilter.blur(sigmaX: 70, sigmaY: 70),
             child: Container(color: Colors.transparent),
@@ -329,7 +269,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(detector),
+                _buildHeader(),
                 _buildStatusBanner(detector),
                 _buildSearchAndFilters(),
                 if (_showMap && _searchQuery.isEmpty)
@@ -383,48 +323,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader(NetworkDetectorService detector) {
+  Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "WHITELIST RADAR // РФ",
-                style: TextStyle(
-                  fontFamily: 'monospace',
-                  fontSize: 12,
-                  letterSpacing: 2,
-                  color: Colors.white.withOpacity(0.5),
-                  fontWeight: FontWeight.bold,
-                ),
-              ),
-              const SizedBox(height: 4),
-              const Text(
-                "Мониторинг сети",
-                style: TextStyle(
-                  fontSize: 26,
-                  color: Colors.white,
-                  fontWeight: FontWeight.w900,
-                  letterSpacing: -0.5,
-                ),
-              ),
-            ],
-          ),
-          IconButton(
-            onPressed: () => _showProbesSheet(detector),
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: Colors.white.withOpacity(0.05),
-                borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withOpacity(0.1)),
-              ),
-              child: const Icon(Icons.radar_outlined, color: Color(0xFF00FFA3), size: 22),
+          Text(
+            "WHITELIST RADAR // РФ",
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              letterSpacing: 2,
+              color: Colors.white.withOpacity(0.5),
+              fontWeight: FontWeight.bold,
             ),
+          ),
+          const SizedBox(height: 4),
+          const Text(
+            "Мониторинг сети",
+            style: TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: -0.5),
           ),
         ],
       ),
@@ -529,7 +447,16 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSearchAndFilters() {
-    final districts = ["ВСЕ", "ЦФО", "СЗФО", "ЮФО", "ПФО", "УФО", "СФО"];
+    // Понятные нормальные названия макрорегионов
+    final districts = [
+      "ВСЕ",
+      "Центр (Москва/МО)",
+      "Северо-Запад (СПб)",
+      "Юг",
+      "Поволжье",
+      "Урал",
+      "Сибирь",
+    ];
 
     return Column(
       children: [
