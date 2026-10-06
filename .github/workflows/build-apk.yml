@@ -36,20 +36,32 @@ jobs:
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      # Настраиваем разрешения и desugaring с поддержкой build.gradle.kts
-      - name: Enable Core Library Desugaring & Permissions
+      # Гарантированное добавление coreLibraryDesugaring в Kotlin DSL
+      - name: Configure Android Permissions and Desugaring
         run: |
           echo "android.builder.sdkDownload=false" >> android/gradle.properties
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' android/app/src/main/AndroidManifest.xml
-          
+
           if [ -f "android/app/build.gradle.kts" ]; then
-            echo "Configuring Kotlin DSL (build.gradle.kts)..."
+            echo "Patching build.gradle.kts..."
+            # Включаем флаг в compileOptions
             sed -i '/compileOptions {/a \        isCoreLibraryDesugaringEnabled = true' android/app/build.gradle.kts
-            sed -i '/dependencies {/a \    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")' android/app/build.gradle.kts
+            # Дописываем гарантированный блок dependencies в самый конец файла
+            cat << 'EOF' >> android/app/build.gradle.kts
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
+}
+EOF
           elif [ -f "android/app/build.gradle" ]; then
-            echo "Configuring Groovy (build.gradle)..."
+            echo "Patching build.gradle..."
             sed -i '/compileOptions {/a \        coreLibraryDesugaringEnabled true' android/app/build.gradle
-            sed -i '/dependencies {/a \    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"' android/app/build.gradle
+            cat << 'EOF' >> android/app/build.gradle
+
+dependencies {
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
+}
+EOF
           fi
 
       - name: Install dependencies
