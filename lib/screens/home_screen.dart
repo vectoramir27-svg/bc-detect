@@ -21,8 +21,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedDistrict = "ВСЕ";
   bool _showMap = true;
 
-  // ВСТАВЬ СЮДА IP-АДРЕС СВОЕГО VPS СЕРВЕРА:
-  final String _serverUrl = "http://144.31.192.63:8080";
+  // Твой настроенный VPS-сервер с работающей админкой:
+  final String _serverUrl = "http://64.188.64.121:8080";
 
   @override
   void initState() {
@@ -73,7 +73,10 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF00FFA3),
-            content: Text("Жалоба по г. $city отправлена на сервер!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            content: Text(
+              "Жалоба по г. $city отправлена на сервер!",
+              style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
+            ),
           ),
         );
       } else {
@@ -81,11 +84,10 @@ class _HomeScreenState extends State<HomeScreen> {
       }
     } catch (_) {
       if (!mounted) return;
-      // Сохраняем локально, если сервер под глушилкой не ответил
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF1E2638),
-          content: Text("Сервер недоступен из-за фильтров. Жалоба по г. $city сохранена локально!"),
+          content: Text("Сервер временно недоступен. Жалоба по г. $city сохранена в оффлайн-буфер."),
         ),
       );
     }
@@ -175,7 +177,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text("Города региона в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                const Text("Населенные пункты в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -230,6 +232,90 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  void _showProbesSheet(NetworkDetectorService detector) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      isScrollControlled: true,
+      builder: (context) {
+        return BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: BoxDecoration(
+              color: const Color(0xFF111622).withOpacity(0.95),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
+                  ),
+                ),
+                const SizedBox(height: 18),
+                const Text("Матрица доступности шлюзов", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
+                const SizedBox(height: 6),
+                Text("Тестирование сквозного трафика и DPI", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+                const SizedBox(height: 16),
+                ...detector.probes.map((probe) {
+                  return Container(
+                    margin: const EdgeInsets.only(bottom: 8),
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.white.withOpacity(0.03),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white.withOpacity(0.06)),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(probe.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                            Text(probe.isWhitelistExpected ? "Пул белого списка РФ" : "Внешний глобальный узел", style: TextStyle(color: Colors.white38, fontSize: 11)),
+                          ],
+                        ),
+                        Row(
+                          children: [
+                            if (probe.latencyMs != null)
+                              Text("${probe.latencyMs} ms  ", style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace')),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: (probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366)).withOpacity(0.15),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                probe.isReachable ? "OK" : "BLOCKED",
+                                style: TextStyle(
+                                  color: probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ],
+                        )
+                      ],
+                    ),
+                  );
+                }),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final detector = Provider.of<NetworkDetectorService>(context);
@@ -269,7 +355,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(),
+                _buildHeader(detector),
                 _buildStatusBanner(detector),
                 _buildSearchAndFilters(),
                 if (_showMap && _searchQuery.isEmpty)
@@ -323,26 +409,43 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader() {
+  Widget _buildHeader(NetworkDetectorService detector) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
-          Text(
-            "WHITELIST RADAR // РФ",
-            style: TextStyle(
-              fontFamily: 'monospace',
-              fontSize: 12,
-              letterSpacing: 2,
-              color: Colors.white.withOpacity(0.5),
-              fontWeight: FontWeight.bold,
-            ),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "WHITELIST RADAR // РФ",
+                style: TextStyle(
+                  fontFamily: 'monospace',
+                  fontSize: 12,
+                  letterSpacing: 2,
+                  color: Colors.white.withOpacity(0.5),
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 4),
+              const Text(
+                "Мониторинг сети",
+                style: TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+              ),
+            ],
           ),
-          const SizedBox(height: 4),
-          const Text(
-            "Мониторинг сети",
-            style: TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: -0.5),
+          IconButton(
+            onPressed: () => _showProbesSheet(detector),
+            icon: Container(
+              padding: const EdgeInsets.all(8),
+              decoration: BoxDecoration(
+                color: Colors.white.withOpacity(0.05),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.white.withOpacity(0.1)),
+              ),
+              child: const Icon(Icons.radar_outlined, color: Color(0xFF00FFA3), size: 22),
+            ),
           ),
         ],
       ),
@@ -447,7 +550,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _buildSearchAndFilters() {
-    // Понятные нормальные названия макрорегионов
     final districts = [
       "ВСЕ",
       "Центр (Москва/МО)",
