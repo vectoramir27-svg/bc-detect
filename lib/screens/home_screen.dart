@@ -5,7 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../models/region_status.dart';
 import '../data/regions_database.dart';
 import '../services/detector_service.dart';
@@ -21,21 +20,19 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
   late List<RegionInfo> _regions;
   String? _savedCity;
   RegionInfo? _myRegion;
-  bool _notificationsEnabled = true;
+  bool _liveAlertsEnabled = true;
   String _searchQuery = "";
 
   late AnimationController _animController;
   late Animation<double> _fadeAnim;
   late Animation<Offset> _slideAnim;
 
-  final FlutterLocalNotificationsPlugin _notificationsPlugin = FlutterLocalNotificationsPlugin();
   final String _serverUrl = "http://64.188.64.121:8080";
 
   @override
   void initState() {
     super.initState();
     _regions = RegionsDatabase.getInitialRegions();
-    _initNotifications();
     _initAnimation();
     _loadUserCity();
   }
@@ -58,37 +55,46 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _animController.forward();
   }
 
-  Future<void> _initNotifications() async {
-    const androidSettings = AndroidInitializationSettings('@mipmap/ic_launcher');
-    const initSettings = InitializationSettings(android: androidSettings);
-    await _notificationsPlugin.initialize(initSettings);
-  }
-
-  Future<void> _sendPushNotification(String title, String body) async {
-    if (!_notificationsEnabled) return;
-    const androidDetails = AndroidNotificationDetails(
-      'network_alerts_channel',
-      'Оповещения изоляции сети',
-      channelDescription: 'Срочные пуши при переводе региона в режим белых списков',
-      importance: Importance.max,
-      priority: Priority.high,
-      color: Color(0xFFFF3366),
-      enableLights: true,
-      ledColor: Color(0xFFFF3366),
-      ledOnMs: 1000,
-      ledOffMs: 500,
+  void _triggerLiveAlert(String title, String message) {
+    if (!_liveAlertsEnabled) return;
+    HapticFeedback.heavyImpact();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        backgroundColor: const Color(0xFF131A26),
+        behavior: SnackBarBehavior.floating,
+        margin: const EdgeInsets.fromLTRB(16, 0, 16, 20),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Color(0xFFFF3366), width: 1.5),
+        ),
+        duration: const Duration(seconds: 5),
+        content: Row(
+          children: [
+            const Icon(Icons.warning_amber_rounded, color: Color(0xFFFF3366), size: 24),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text(message, style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 12)),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
     );
-    final notificationDetails = NotificationDetails(android: androidDetails);
-    await _notificationsPlugin.show(101, title, body, notificationDetails);
   }
 
   Future<void> _loadUserCity() async {
     final prefs = await SharedPreferences.getInstance();
     final city = prefs.getString("user_city");
-    final notifs = prefs.getBool("notifs_enabled") ?? true;
+    final alerts = prefs.getBool("live_alerts_enabled") ?? true;
 
     setState(() {
-      _notificationsEnabled = notifs;
+      _liveAlertsEnabled = alerts;
     });
 
     if (city != null) {
@@ -155,7 +161,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             backgroundColor: const Color(0xFF00FFA3),
             behavior: SnackBarBehavior.floating,
             shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-            content: Text("Отчёт по $city отправлен в радарный центр!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            content: Text("Отчёт по $city зафиксирован на сервере!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         );
       }
@@ -166,7 +172,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
           backgroundColor: const Color(0xFF1E2638),
           behavior: SnackBarBehavior.floating,
           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-          content: Text("Сервер под глушилкой недоступен. Отчёт по $city сохранён локально."),
+          content: Text("Сервер временно недоступен. Отчёт сохранён локально."),
         ),
       );
     }
@@ -214,7 +220,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    "Приложение автоматически определит область и настроит персональный радар изоляции сети",
+                    "Приложение настроит персональный радар изоляции сети под ваш населённый пункт",
                     style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
                   ),
                   const SizedBox(height: 16),
@@ -305,12 +311,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
               ),
               const SizedBox(height: 14),
               Text(
-                "Когда мобильный интернет режется ТСПУ до «белых списков», всё равно продолжают работать:",
+                "Когда мобильный интернет режется ТСПУ до «белых списков», продолжают работать:",
                 style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, height: 1.4),
               ),
               const SizedBox(height: 14),
               _buildSosItem(Icons.verified_user_outlined, "Госуслуги (ЕСИА)", "Вход, справки, вызовы экстренных служб"),
-              _buildSosItem(Icons.account_balance_outlined, "Банковские приложения", "Сбер, Т-Банк, СБП-переводы (пулы не блокируются)"),
+              _buildSosItem(Icons.account_balance_outlined, "Банковские приложения", "Сбер, Т-Банк, СБП-переводы"),
               _buildSosItem(Icons.local_shipping_outlined, "Маркетплейсы и такси", "Яндекс Go, Ozon, Wildberries"),
               _buildSosItem(Icons.phone_in_talk_outlined, "Экстренные номера", "112 (работает даже без SIM-карты)"),
               const SizedBox(height: 20),
@@ -411,7 +417,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     const SizedBox(height: 14),
                     _buildQuickActionGrid(myReg, cityTitle),
                     const SizedBox(height: 16),
-                    _buildLiveNotifToggle(),
+                    _buildLiveAlertToggle(),
                     const SizedBox(height: 24),
                     _buildRegionsSectionHeader(),
                     const SizedBox(height: 12),
@@ -579,10 +585,10 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
                     HapticFeedback.lightImpact();
                     final prevStatus = detector.localStatus;
                     await detector.runDiagnostics();
-                    if (prevStatus != detector.localStatus && _notificationsEnabled) {
-                      _sendPushNotification(
-                        "Изменение статуса сети!",
-                        "Текущий режим в вашем городе: ${_getStatusText(detector.localStatus)}",
+                    if (prevStatus != detector.localStatus) {
+                      _triggerLiveAlert(
+                        "Изменение статуса сети",
+                        "Текущий режим: ${_getStatusText(detector.localStatus)}",
                       );
                     }
                   },
@@ -680,7 +686,7 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  Widget _buildLiveNotifToggle() {
+  Widget _buildLiveAlertToggle() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
       child: BackdropFilter(
@@ -697,30 +703,27 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             children: [
               Row(
                 children: [
-                  Icon(Icons.notifications_active_outlined, color: _notificationsEnabled ? const Color(0xFF00FFA3) : Colors.white38, size: 20),
+                  Icon(Icons.notifications_active_outlined, color: _liveAlertsEnabled ? const Color(0xFF00FFA3) : Colors.white38, size: 20),
                   const SizedBox(width: 12),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Text("Push-оповещения в шторку", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
+                      const Text("Live-информирование", style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold)),
                       Text("Предупреждать при смене статуса сети", style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 11)),
                     ],
                   ),
                 ],
               ),
               Switch(
-                value: _notificationsEnabled,
+                value: _liveAlertsEnabled,
                 activeColor: const Color(0xFF00FFA3),
                 activeTrackColor: const Color(0xFF00FFA3).withOpacity(0.2),
                 inactiveThumbColor: Colors.white38,
                 inactiveTrackColor: Colors.white10,
                 onChanged: (val) async {
                   final prefs = await SharedPreferences.getInstance();
-                  await prefs.setBool("notifs_enabled", val);
-                  setState(() => _notificationsEnabled = val);
-                  if (val) {
-                    _sendPushNotification("Монитор активирован", "Вы будете получать уведомления при включении белых списков");
-                  }
+                  await prefs.setBool("live_alerts_enabled", val);
+                  setState(() => _liveAlertsEnabled = val);
                 },
               ),
             ],
