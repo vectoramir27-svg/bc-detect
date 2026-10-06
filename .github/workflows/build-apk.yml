@@ -28,7 +28,7 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Install ImageMagick for Icons
+      - name: Install ImageMagick
         run: sudo apt-get update && sudo apt-get install -y imagemagick
 
       - name: Recreate Android platform with v2 embedding
@@ -36,14 +36,15 @@ jobs:
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      - name: Add Internet permission to AndroidManifest
+      # Отключаем ненужный NDK, чтобы Gradle не качал 1.5 ГБ
+      - name: Configure Android Gradle (Disable NDK download)
         run: |
+          echo "android.builder.sdkDownload=false" >> android/gradle.properties
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Install dependencies
         run: flutter pub get
 
-      # Принудительно генерируем иконки всех размеров из assets/logo.png
       - name: Apply Custom App Logo to Android Resources
         run: |
           if [ -f "assets/logo.png" ]; then
@@ -60,8 +61,9 @@ jobs:
             echo "assets/logo.png not found. Using default icon."
           fi
 
+      # Собираем сразу без затягивания NDK
       - name: Build Android Release APK
-        run: flutter build apk --release
+        run: flutter build apk --release --no-tree-shake-icons
 
       - name: Upload Release APK to Artifacts
         uses: actions/upload-artifact@v4
