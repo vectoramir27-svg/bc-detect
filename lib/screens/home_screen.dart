@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
@@ -17,7 +16,7 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
+class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateMixin {
   late List<RegionInfo> _regions;
   String? _savedCity;
   RegionInfo? _myRegion;
@@ -50,7 +49,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
   void _initAnimations() {
     _entryController = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 650),
+      duration: const Duration(milliseconds: 600),
     );
     _fadeAnimation = CurvedAnimation(parent: _entryController, curve: Curves.easeOut);
     _slideAnimation = Tween<Offset>(begin: const Offset(0, 0.04), end: Offset.zero).animate(
@@ -59,17 +58,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     _entryController.forward();
   }
 
-  // Запрос системного разрешения Android 13+ на пуши через платформенный канал
-  Future<void> _requestNotificationPermission() async {
-    try {
-      const platform = MethodChannel('dexterx.dev/flutter_local_notifications_plugin');
-      await platform.invokeMethod('requestNotificationsPermission');
-    } catch (_) {
-      // Платформа обработает нативно или через настройки
-    }
-  }
-
-  // Фоновый монитор: каждые 45 секунд проверяет изменение статуса и бьет тревогу
   void _startLiveBackgroundMonitor() {
     _liveMonitorTimer = Timer.periodic(const Duration(seconds: 45), (_) async {
       if (!_liveAlertsEnabled || !mounted) return;
@@ -97,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           borderRadius: BorderRadius.circular(18),
           side: const BorderSide(color: Color(0xFFFF3366), width: 1.5),
         ),
-        duration: const Duration(seconds: 6),
+        duration: const Duration(seconds: 5),
         content: Row(
           children: [
             Container(
@@ -231,82 +219,79 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           final query = searchCtrl.text.toLowerCase();
           final filtered = searchList.where((item) => item["city"]!.toLowerCase().contains(query) || item["region"]!.toLowerCase().contains(query)).toList();
 
-          return BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-            child: Container(
-              height: MediaQuery.of(context).size.height * 0.78,
-              padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
-              decoration: BoxDecoration(
-                color: const Color(0xFF0F1522).withOpacity(0.96),
-                borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-                border: Border.all(color: Colors.white.withOpacity(0.12)),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
-                  const SizedBox(height: 18),
-                  Text(
-                    isFirstRun ? "👋 В каком городе вы находитесь?" : "📍 Выбор вашего города",
-                    style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+          return Container(
+            height: MediaQuery.of(context).size.height * 0.78,
+            padding: const EdgeInsets.fromLTRB(24, 20, 24, 20),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0F1522),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+              border: Border.all(color: Colors.white.withOpacity(0.12)),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
+                const SizedBox(height: 18),
+                Text(
+                  isFirstRun ? "👋 В каком городе вы находитесь?" : "📍 Выбор вашего города",
+                  style: const TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  "Приложение настроит мониторинг под ваш населённый пункт",
+                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
+                ),
+                const SizedBox(height: 16),
+                Container(
+                  height: 48,
+                  decoration: BoxDecoration(
+                    color: Colors.white.withOpacity(0.05),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: Colors.white.withOpacity(0.1)),
                   ),
-                  const SizedBox(height: 6),
-                  Text(
-                    "Приложение настроит мониторинг под ваш населённый пункт",
-                    style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
-                  ),
-                  const SizedBox(height: 16),
-                  Container(
-                    height: 48,
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.05),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white.withOpacity(0.1)),
-                    ),
-                    child: TextField(
-                      controller: searchCtrl,
-                      autofocus: isFirstRun,
-                      style: const TextStyle(color: Colors.white, fontSize: 14),
-                      onChanged: (_) => setSheetState(() {}),
-                      decoration: InputDecoration(
-                        hintText: "Поиск: Кубинка, Москва, Белгород...",
-                        hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
-                        prefixIcon: const Icon(Icons.search, color: Color(0xFF00FFA3), size: 20),
-                        border: InputBorder.none,
-                        contentPadding: const EdgeInsets.symmetric(vertical: 14),
-                      ),
+                  child: TextField(
+                    controller: searchCtrl,
+                    autofocus: isFirstRun,
+                    style: const TextStyle(color: Colors.white, fontSize: 14),
+                    onChanged: (_) => setSheetState(() {}),
+                    decoration: InputDecoration(
+                      hintText: "Поиск: Кубинка, Москва, Белгород...",
+                      hintStyle: TextStyle(color: Colors.white.withOpacity(0.3), fontSize: 14),
+                      prefixIcon: const Icon(Icons.search, color: Color(0xFF00FFA3), size: 20),
+                      border: InputBorder.none,
+                      contentPadding: const EdgeInsets.symmetric(vertical: 14),
                     ),
                   ),
-                  const SizedBox(height: 14),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filtered.length,
-                      itemBuilder: (context, i) {
-                        final item = filtered[i];
-                        return Container(
-                          margin: const EdgeInsets.only(bottom: 6),
-                          decoration: BoxDecoration(
-                            color: Colors.white.withOpacity(0.02),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withOpacity(0.04)),
-                          ),
-                          child: ListTile(
-                            dense: true,
-                            title: Text(item["city"]!, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                            subtitle: Text(item["region"]!, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
-                            trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 14),
-                            onTap: () {
-                              _applyCity(item["city"]!);
-                              Navigator.pop(ctx);
-                              HapticFeedback.selectionClick();
-                            },
-                          ),
-                        );
-                      },
-                    ),
+                ),
+                const SizedBox(height: 14),
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: filtered.length,
+                    itemBuilder: (context, i) {
+                      final item = filtered[i];
+                      return Container(
+                        margin: const EdgeInsets.only(bottom: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withOpacity(0.02),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white.withOpacity(0.04)),
+                        ),
+                        child: ListTile(
+                          dense: true,
+                          title: Text(item["city"]!, style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                          subtitle: Text(item["region"]!, style: TextStyle(color: Colors.white.withOpacity(0.4), fontSize: 12)),
+                          trailing: const Icon(Icons.arrow_forward_ios, color: Colors.white24, size: 14),
+                          onTap: () {
+                            _applyCity(item["city"]!);
+                            Navigator.pop(ctx);
+                            HapticFeedback.selectionClick();
+                          },
+                        ),
+                      );
+                    },
                   ),
-                ],
-              ),
+                ),
+              ],
             ),
           );
         },
@@ -319,41 +304,38 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (ctx) => BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          padding: const EdgeInsets.all(26),
-          decoration: BoxDecoration(
-            color: const Color(0xFF0F1522).withOpacity(0.96),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
-            border: Border.all(color: const Color(0xFFFF3366).withOpacity(0.3)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
-              const SizedBox(height: 18),
-              const Row(
-                children: [
-                  Icon(Icons.shield_outlined, color: Color(0xFFFF3366), size: 24),
-                  SizedBox(width: 10),
-                  Text("Памятка: Включен белый список", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              const SizedBox(height: 14),
-              Text(
-                "Когда мобильный интернет режется ТСПУ до «белых списков», продолжают работать:",
-                style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, height: 1.4),
-              ),
-              const SizedBox(height: 14),
-              _buildSosItem(Icons.verified_user_outlined, "Госуслуги (ЕСИА)", "Вход, справки, вызовы экстренных служб"),
-              _buildSosItem(Icons.account_balance_outlined, "Банковские приложения", "Сбер, Т-Банк, СБП-переводы"),
-              _buildSosItem(Icons.local_shipping_outlined, "Маркетплейсы и такси", "Яндекс Go, Ozon, Wildberries"),
-              _buildSosItem(Icons.phone_in_talk_outlined, "Экстренные номера", "112 (работает даже без SIM-карты)"),
-              const SizedBox(height: 20),
-            ],
-          ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.all(26),
+        decoration: BoxDecoration(
+          color: const Color(0xFF0F1522),
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(32)),
+          border: Border.all(color: const Color(0xFFFF3366).withOpacity(0.3)),
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(child: Container(width: 44, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)))),
+            const SizedBox(height: 18),
+            const Row(
+              children: [
+                Icon(Icons.shield_outlined, color: Color(0xFFFF3366), size: 24),
+                SizedBox(width: 10),
+                Text("Памятка: Включен белый список", style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+              ],
+            ),
+            const SizedBox(height: 14),
+            Text(
+              "Когда мобильный интернет режется ТСПУ до «белых списков», продолжают работать:",
+              style: TextStyle(color: Colors.white.withOpacity(0.7), fontSize: 13, height: 1.4),
+            ),
+            const SizedBox(height: 14),
+            _buildSosItem(Icons.verified_user_outlined, "Госуслуги (ЕСИА)", "Вход, справки, вызовы экстренных служб"),
+            _buildSosItem(Icons.account_balance_outlined, "Банковские приложения", "Сбер, Т-Банк, СБП-переводы"),
+            _buildSosItem(Icons.local_shipping_outlined, "Маркетплейсы и такси", "Яндекс Go, Ozon, Wildberries"),
+            _buildSosItem(Icons.phone_in_talk_outlined, "Экстренные номера", "112 (работает даже без SIM-карты)"),
+            const SizedBox(height: 20),
+          ],
         ),
       ),
     );
@@ -403,18 +385,28 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       backgroundColor: const Color(0xFF070A0F),
       body: Stack(
         children: [
-          // Оптимизированный неоновый фон
-          RepaintBoundary(
-            child: Positioned(
-              top: -80,
-              right: -60,
-              child: Container(
-                width: 300,
-                height: 300,
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  gradient: RadialGradient(colors: [myColor.withOpacity(0.16), Colors.transparent]),
-                ),
+          // Фоновые мягкие неоновые круги прямо внутри Stack
+          Positioned(
+            top: -80,
+            right: -60,
+            child: Container(
+              width: 280,
+              height: 280,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(colors: [myColor.withOpacity(0.18), Colors.transparent]),
+              ),
+            ),
+          ),
+          Positioned(
+            top: 300,
+            left: -80,
+            child: Container(
+              width: 260,
+              height: 260,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(colors: [const Color(0xFF0075FF).withOpacity(0.10), Colors.transparent]),
               ),
             ),
           ),
@@ -508,12 +500,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Главная супер-карточка
   Widget _buildPrimaryCityCard(String city, RegionInfo reg, Color statusColor, NetworkDetectorService detector) {
     return Container(
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
-        color: const Color(0xFF0F1522).withOpacity(0.85),
+        color: const Color(0xFF0F1522),
         borderRadius: BorderRadius.circular(26),
         border: Border.all(color: statusColor.withOpacity(0.35), width: 1.5),
         boxShadow: [
@@ -618,7 +609,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Одинаковые ровные карточки действий
   Widget _buildQuickActionGrid(RegionInfo reg, String city) {
     return Row(
       children: [
@@ -629,10 +619,10 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
               _showSosHelpSheet();
             },
             child: Container(
-              height: 105, // Фиксированная одинаковая высота!
+              height: 105,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
-                color: const Color(0xFF101622).withOpacity(0.7),
+                color: const Color(0xFF101622),
                 borderRadius: BorderRadius.circular(18),
                 border: Border.all(color: Colors.white.withOpacity(0.08)),
               ),
@@ -659,7 +649,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
           child: GestureDetector(
             onTap: () => _sendReportToServer(reg, city),
             child: Container(
-              height: 105, // Фиксированная одинаковая высота!
+              height: 105,
               padding: const EdgeInsets.all(14),
               decoration: BoxDecoration(
                 color: const Color(0xFFFF3366).withOpacity(0.08),
@@ -688,12 +678,11 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
     );
   }
 
-  // Переключатель Live-информирования
   Widget _buildLiveAlertToggle() {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       decoration: BoxDecoration(
-        color: const Color(0xFF101622).withOpacity(0.7),
+        color: const Color(0xFF101622),
         borderRadius: BorderRadius.circular(18),
         border: Border.all(color: Colors.white.withOpacity(0.07)),
       ),
@@ -721,9 +710,6 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
             inactiveTrackColor: Colors.white10,
             onChanged: (val) async {
               HapticFeedback.lightImpact();
-              if (val) {
-                await _requestNotificationPermission();
-              }
               final prefs = await SharedPreferences.getInstance();
               await prefs.setBool("live_alerts_enabled", val);
               setState(() => _liveAlertsEnabled = val);
@@ -776,7 +762,7 @@ class _HomeScreenState extends State<HomeScreen> with TickerProviderStateMixin {
       margin: const EdgeInsets.only(bottom: 8),
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: const Color(0xFF101622).withOpacity(0.5),
+        color: const Color(0xFF101622),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.white.withOpacity(0.04)),
       ),
