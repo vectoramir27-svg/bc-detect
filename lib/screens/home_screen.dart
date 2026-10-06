@@ -239,7 +239,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       elevation: 0,
                       shape: RoundedRectangleBorder(
                         borderRadius: BorderRadius.circular(12),
-                        side: Border.all(color: Colors.white.withOpacity(0.12)),
+                        side: BorderSide(color: Colors.white.withOpacity(0.12)), // ИСПРАВЛЕНО
                       ),
                     ),
                     child: detector.isChecking
