@@ -40,6 +40,12 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     _loadUserCity();
   }
 
+  @override
+  void dispose() {
+    _animController.dispose();
+    super.dispose();
+  }
+
   void _initAnimation() {
     _animController = AnimationController(
       vsync: this,
@@ -72,8 +78,8 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       ledOnMs: 1000,
       ledOffMs: 500,
     );
-    const details = NotificationSettings(android: androidDetails);
-    await _notificationsPlugin.show(101, title, body, const NotificationDetails(android: androidDetails));
+    final notificationDetails = NotificationDetails(android: androidDetails);
+    await _notificationsPlugin.show(101, title, body, notificationDetails);
   }
 
   Future<void> _loadUserCity() async {
@@ -106,7 +112,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       }
     }
 
-    // Если точного города в базе нет, берем Москву/МО по умолчанию
     matched ??= _regions.first;
 
     setState(() {
@@ -360,7 +365,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
       backgroundColor: const Color(0xFF070A0F),
       body: Stack(
         children: [
-          // Глубокие объемные фоновые неоновые световые пятна (Ambient Glow)
           Positioned(
             top: -100,
             right: -80,
@@ -393,8 +397,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
             filter: ImageFilter.blur(sigmaX: 80, sigmaY: 80),
             child: Container(color: Colors.transparent),
           ),
-
-          // Основной контент с плавной входной анимацией
           SafeArea(
             child: FadeTransition(
               opacity: _fadeAnim,
@@ -495,7 +497,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Главная супер-карточка выбранного города с эффектом объёмного Liquid Glass
   Widget _buildPrimaryCityCard(String city, RegionInfo reg, Color statusColor, NetworkDetectorService detector) {
     return ClipRRect(
       borderRadius: BorderRadius.circular(26),
@@ -613,7 +614,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Сетка полезных функций (Памятка SOS + Кнопка тревоги в городе)
   Widget _buildQuickActionGrid(RegionInfo reg, String city) {
     return Row(
       children: [
@@ -680,7 +680,6 @@ class _HomeScreenState extends State<HomeScreen> with SingleTickerProviderStateM
     );
   }
 
-  // Переключатель Live-пуш уведомлений
   Widget _buildLiveNotifToggle() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(18),
