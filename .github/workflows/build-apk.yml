@@ -31,6 +31,17 @@ jobs:
       - name: Verify Flutter version
         run: flutter --version
 
+      # Генерируем чистый актуальный Android v2 embedding проект
+      - name: Recreate Android platform with v2 embedding
+        run: |
+          rm -rf android/
+          flutter create . --platforms=android --org com.wonderfultech.netmonitor
+
+      # Добавляем разрешение на доступ в интернет в свежесозданный Manifest
+      - name: Add Internet permission to AndroidManifest
+        run: |
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
+
       - name: Install dependencies
         run: flutter pub get
 
