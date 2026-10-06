@@ -3,8 +3,6 @@ import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
-import 'package:flutter_map/flutter_map.dart';
-import 'package:latlong2/latlong.dart';
 import '../models/region_status.dart';
 import '../data/regions_database.dart';
 import '../services/detector_service.dart';
@@ -17,52 +15,18 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  int _currentTabIndex = 0;
-  late final PageController _pageController;
+  int _currentTabIndex = 0; // 0: Главная, 1: Карта, 2: Настройки
   late List<RegionInfo> _regions;
   String _searchQuery = "";
   String _selectedDistrict = "ВСЕ";
 
   final String _serverUrl = "http://64.188.64.121:8080";
-  final MapController _mapController = MapController();
 
   @override
   void initState() {
     super.initState();
-    _pageController = PageController(initialPage: 0);
+    // Загружаем ЖЕСТКИЕ НАСТОЯЩИЕ СТАТУСЫ (Белгород/Курск - белые списки и т.д.)
     _regions = RegionsDatabase.getInitialRegions();
-    _syncStatusesWithServer();
-  }
-
-  @override
-  void dispose() {
-    _pageController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _syncStatusesWithServer() async {
-    try {
-      final res = await http.get(Uri.parse("$_serverUrl/api/status")).timeout(const Duration(seconds: 4));
-      if (res.statusCode == 200) {
-        final Map<String, dynamic> data = jsonDecode(res.body);
-        setState(() {
-          for (final region in _regions) {
-            if (data.containsKey(region.id)) {
-              final info = data[region.id];
-              final statusStr = info["status"];
-              switch (statusStr) {
-                case "normal": region.level = RestrictionLevel.normal; break;
-                case "warning": region.level = RestrictionLevel.warning; break;
-                case "whitelistActive": region.level = RestrictionLevel.whitelistActive; break;
-                case "fullBlackout": region.level = RestrictionLevel.fullBlackout; break;
-              }
-              if (info["comment"] != null) region.comment = info["comment"];
-              if (info["reports_24h"] != null) region.reportsCount24h = info["reports_24h"];
-            }
-          }
-        });
-      }
-    } catch (_) {}
   }
 
   Color _getStatusColor(RestrictionLevel level) {
@@ -83,6 +47,7 @@ class _HomeScreenState extends State<HomeScreen> {
     }
   }
 
+  // Отправка жалобы строго в админку без ломания локальных статусов
   Future<void> _sendReportToServer(RegionInfo region, String chosenCity) async {
     try {
       final res = await http.post(
@@ -98,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen> {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF00FFA3),
-            content: Text("Жалоба по г. $chosenCity принята сервером!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
+            content: Text("Жалоба по г. $chosenCity ушла в админку!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         );
       }
@@ -107,7 +72,7 @@ class _HomeScreenState extends State<HomeScreen> {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF1E2638),
-          content: Text("Сервер временно недоступен. Жалоба сохранена локально."),
+          content: Text("Сервер недоступен. Жалоба по г. $chosenCity сохранена в локальный буфер."),
         ),
       );
     }
@@ -249,31 +214,16 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white.withOpacity(0.06)),
                   ),
-                  child: Column(
+                  child: Row(
                     children: [
-                      Row(
-                        children: [
-                          Icon(Icons.info_outline, color: color, size: 20),
-                          const SizedBox(width: 12),
-                          Expanded(child: Text(region.comment, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3))),
-                        ],
-                      ),
-                      const SizedBox(height: 10),
-                      Row(
-                        children: [
-                          const Icon(Icons.people_outline, color: Color(0xFF00E5FF), size: 18),
-                          const SizedBox(width: 8),
-                          Text(
-                            "Жалоб за 24ч: ${region.reportsCount24h}",
-                            style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.bold),
-                          ),
-                        ],
-                      ),
+                      Icon(Icons.info_outline, color: color, size: 20),
+                      const SizedBox(width: 12),
+                      Expanded(child: Text(region.comment, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3))),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text("Населённые пункты региона в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                const Text("Населённые пункты в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -333,27 +283,25 @@ class _HomeScreenState extends State<HomeScreen> {
     final detector = Provider.of<NetworkDetectorService>(context);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF070A0F),
+      backgroundColor: const Color(0xFF090C10),
       body: Stack(
         children: [
-          // Плавный анимированный переход между вкладками
-          PageView(
-            controller: _pageController,
-            onPageChanged: (idx) => setState(() => _currentTabIndex = idx),
-            physics: const BouncingScrollPhysics(),
+          // Отображение вкладки БЕЗ тупых рывков анимации
+          IndexedStack(
+            index: _currentTabIndex,
             children: [
               _buildMainTab(detector),
-              _buildMapTab(),
+              _buildFullVectorMapTab(),
               _buildSettingsTab(),
             ],
           ),
 
-          // Компактный плавающий Glass-бар внизу (Liquid Glass Telegram UI)
+          // Компактный аккуратный Liquid Glass бар
           Positioned(
-            left: 24,
-            right: 24,
-            bottom: 20,
-            child: _buildFloatingNavBar(),
+            left: 30,
+            right: 30,
+            bottom: 18,
+            child: _buildBottomBar(),
           ),
         ],
       ),
@@ -385,7 +333,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ),
           Expanded(
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(20, 4, 20, 95),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 85),
               itemCount: filtered.length,
               itemBuilder: (context, index) {
                 final region = filtered[index];
@@ -407,126 +355,117 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Настоящая карта мира на бесплатном OpenStreetMap (без API-ключей) в тёмном фильтре
-  Widget _buildMapTab() {
-    return Stack(
-      children: [
-        ColorFiltered(
-          // Применяем инверсию и контраст для идеального тёмного киберпанк-стиля
-          colorFilter: const ColorFilter.matrix([
-            -0.85, 0, 0, 0, 255,
-            0, -0.85, 0, 0, 255,
-            0, 0, -0.85, 0, 255,
-            0, 0, 0, 1, 0,
-          ]),
-          child: FlutterMap(
-            mapController: _mapController,
-            options: const MapOptions(
-              initialCenter: LatLng(55.7558, 37.6173),
-              initialZoom: 5.0,
-              minZoom: 3.0,
-              maxZoom: 18.0,
+  // Полноэкранная векторная гео-карта России (РАБОТАЕТ ВСЕГДА, НЕ ТРЕБУЕТ СЕТИ, ЗУМИТСЯ ПАЛЬЦАМИ)
+  Widget _buildFullVectorMapTab() {
+    return SafeArea(
+      bottom: false,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+            child: Row(
+              children: [
+                const Icon(Icons.public, color: Color(0xFF00FFA3), size: 22),
+                const SizedBox(width: 10),
+                const Text("Интерактивная карта покрытия РФ", style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold)),
+              ],
             ),
-            children: [
-              TileLayer(
-                urlTemplate: 'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-                userAgentPackageName: 'com.wonderfultech.netmonitor',
+          ),
+          Expanded(
+            child: Container(
+              margin: const EdgeInsets.fromLTRB(16, 0, 16, 85),
+              decoration: BoxDecoration(
+                color: const Color(0xFF0D121B),
+                borderRadius: BorderRadius.circular(24),
+                border: Border.all(color: Colors.white12),
               ),
-            ],
-          ),
-        ),
-
-        // Поверх тёмной карты рендерим неоновые маркеры городов и регионов
-        FlutterMap(
-          options: const MapOptions(
-            initialCenter: LatLng(55.7558, 37.6173),
-            initialZoom: 5.0,
-            minZoom: 3.0,
-            maxZoom: 18.0,
-          ),
-          children: [
-            MarkerLayer(
-              markers: _regions.map((region) {
-                final col = _getStatusColor(region.level);
-                return Marker(
-                  point: LatLng(region.latitude, region.longitude),
-                  width: 54,
-                  height: 54,
-                  child: GestureDetector(
-                    onTap: () => _showRegionDetailModal(region),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(24),
+                child: InteractiveViewer(
+                  minScale: 0.9,
+                  maxScale: 4.0,
+                  boundaryMargin: const EdgeInsets.all(50),
+                  child: SizedBox(
+                    width: 700,
+                    height: 450,
+                    child: Stack(
                       children: [
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
-                          decoration: BoxDecoration(
-                            color: const Color(0xFF0B0E14).withOpacity(0.9),
-                            borderRadius: BorderRadius.circular(6),
-                            border: Border.all(color: col, width: 1.2),
-                            boxShadow: [
-                              BoxShadow(color: col.withOpacity(0.4), blurRadius: 6),
-                            ],
-                          ),
-                          child: Text(
-                            region.shortCode,
-                            style: TextStyle(color: col, fontSize: 9, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
-                          ),
+                        CustomPaint(
+                          size: const Size(700, 450),
+                          painter: _OfflineVectorMapPainter(),
                         ),
-                        const SizedBox(height: 2),
-                        Icon(Icons.location_on, color: col, size: 26),
+                        // Маркеры регионов со СВОИМИ РЕАЛЬНЫМИ ЦВЕТАМИ
+                        ..._regions.map((region) {
+                          final pos = _getMapCoords(region.id, const Size(700, 450));
+                          final color = _getStatusColor(region.level);
+                          return Positioned(
+                            left: pos.dx - 22,
+                            top: pos.dy - 32,
+                            child: GestureDetector(
+                              onTap: () => _showRegionDetailModal(region),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: const Color(0xFF070A0F),
+                                      borderRadius: BorderRadius.circular(5),
+                                      border: Border.all(color: color, width: 1.2),
+                                    ),
+                                    child: Text(
+                                      region.shortCode,
+                                      style: TextStyle(color: color, fontSize: 9, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
+                                    ),
+                                  ),
+                                  Icon(Icons.location_on, color: color, size: 22),
+                                ],
+                              ),
+                            ),
+                          );
+                        }),
                       ],
                     ),
-                  ),
-                );
-              }).toList(),
-            ),
-          ],
-        ),
-
-        // Плашка подсказки сверху
-        SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(14),
-              child: BackdropFilter(
-                filter: ImageFilter.blur(sigmaX: 16, sigmaY: 16),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF101724).withOpacity(0.85),
-                    borderRadius: BorderRadius.circular(14),
-                    border: Border.all(color: Colors.white12),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.public, color: Color(0xFF00FFA3), size: 18),
-                      SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          "Карта покрытия РФ (Нажмите на метку города)",
-                          style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                        ),
-                      ),
-                    ],
                   ),
                 ),
               ),
             ),
           ),
-        ),
-      ],
+        ],
+      ),
     );
+  }
+
+  Offset _getMapCoords(String id, Size size) {
+    double x = 0.5, y = 0.5;
+    switch (id) {
+      case "50": x = 0.22; y = 0.44; break; // МО
+      case "77": x = 0.23; y = 0.47; break; // Москва
+      case "78": x = 0.19; y = 0.35; break; // СПб
+      case "47": x = 0.20; y = 0.32; break; // ЛО
+      case "31": x = 0.16; y = 0.54; break; // Белгород (КРАСНЫЙ)
+      case "46": x = 0.17; y = 0.50; break; // Курск (КРАСНЫЙ)
+      case "36": x = 0.20; y = 0.53; break; // Воронеж (ЖЕЛТЫЙ)
+      case "23": x = 0.14; y = 0.64; break; // Краснодар
+      case "61": x = 0.17; y = 0.60; break; // Ростов (ЖЕЛТЫЙ)
+      case "16": x = 0.30; y = 0.49; break; // Казань
+      case "63": x = 0.29; y = 0.55; break; // Самара
+      case "52": x = 0.26; y = 0.46; break; // Нижний Новгород
+      case "66": x = 0.38; y = 0.52; break; // Екб
+      case "74": x = 0.39; y = 0.58; break; // Челябинск
+      case "54": x = 0.52; y = 0.63; break; // Новосибирск
+    }
+    return Offset(x * size.width, y * size.height);
   }
 
   Widget _buildSettingsTab() {
     return SafeArea(
       child: ListView(
-        padding: const EdgeInsets.fromLTRB(20, 20, 20, 95),
+        padding: const EdgeInsets.fromLTRB(20, 20, 20, 85),
         children: [
           const Text("Настройки", style: TextStyle(color: Colors.white, fontSize: 26, fontWeight: FontWeight.w900)),
           const SizedBox(height: 6),
-          Text("Конфигурация шлюзов и клиента", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+          Text("Параметры детектора и сервера", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
           const SizedBox(height: 20),
 
           Container(
@@ -539,16 +478,11 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Text("СЕРВЕР ТЕЛЕМЕТРИИ", style: TextStyle(color: Color(0xFF00FFA3), fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-                const SizedBox(height: 10),
+                const Text("СЕРВЕР ДЛЯ ЖАЛОБ (VPS)", style: TextStyle(color: Color(0xFF00FFA3), fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+                const SizedBox(height: 8),
                 Text(_serverUrl, style: const TextStyle(color: Colors.white70, fontSize: 14, fontFamily: 'monospace')),
-                const SizedBox(height: 14),
-                ElevatedButton.icon(
-                  onPressed: _syncStatusesWithServer,
-                  icon: const Icon(Icons.sync, size: 16),
-                  label: const Text("Синхронизировать сейчас"),
-                  style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0075FF), foregroundColor: Colors.white),
-                )
+                const SizedBox(height: 6),
+                const Text("Жалобы уходят прямо в твою веб-админку", style: TextStyle(color: Colors.white38, fontSize: 12)),
               ],
             ),
           ),
@@ -565,10 +499,10 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text("О ПРИЛОЖЕНИИ", style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
-                const SizedBox(height: 10),
-                const Text("NetMonitor & Whitelist Radar", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                const Text("NetMonitor // Whitelist Radar", style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 4),
-                Text("Версия клиента: 1.3.0 (OpenStreetMap Core)\nДетекция сети: Локальный Dual-Ping аппаратный чекпоинт", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
+                Text("Версия: 1.4.0 (Offline-First Vector Edition)\nЛокальное ядро проверки сотовой связи", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 12)),
               ],
             ),
           ),
@@ -577,28 +511,26 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  // Компактный Liquid Glass Bottom Navigation Bar с плавной анимацией
-  Widget _buildFloatingNavBar() {
+  // Аккуратный, четкий BottomBar
+  Widget _buildBottomBar() {
     return ClipRRect(
-      borderRadius: BorderRadius.circular(30),
+      borderRadius: BorderRadius.circular(26),
       child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 25, sigmaY: 25),
+        filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
         child: Container(
-          height: 56, // Аккуратный компактный размер
+          height: 52,
+          padding: const EdgeInsets.symmetric(horizontal: 10),
           decoration: BoxDecoration(
-            color: const Color(0xFF111722).withOpacity(0.75), // Реальная глубина и прозрачность
-            borderRadius: BorderRadius.circular(30),
-            border: Border.all(color: Colors.white.withOpacity(0.12), width: 1.2),
-            boxShadow: [
-              BoxShadow(color: Colors.black.withOpacity(0.4), blurRadius: 18, offset: const Offset(0, 6)),
-            ],
+            color: const Color(0xFF111722).withOpacity(0.85),
+            borderRadius: BorderRadius.circular(26),
+            border: Border.all(color: Colors.white.withOpacity(0.1)),
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: [
-              _buildNavItem(0, Icons.home_rounded, "Главная"),
-              _buildNavItem(1, Icons.map_rounded, "Карта"),
-              _buildNavItem(2, Icons.tune_rounded, "Настройки"),
+              _buildBarBtn(0, Icons.grid_view_rounded, "Главная"),
+              _buildBarBtn(1, Icons.map_rounded, "Карта"),
+              _buildBarBtn(2, Icons.settings_rounded, "Настройки"),
             ],
           ),
         ),
@@ -606,45 +538,25 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildNavItem(int index, IconData icon, String label) {
-    final isSelected = _currentTabIndex == index;
-    final activeColor = const Color(0xFF00FFA3);
+  Widget _buildBarBtn(int index, IconData icon, String title) {
+    final isSel = _currentTabIndex == index;
+    final color = isSel ? const Color(0xFF00FFA3) : Colors.white38;
 
     return GestureDetector(
-      onTap: () {
-        _pageController.animateToPage(
-          index,
-          duration: const Duration(milliseconds: 280),
-          curve: Curves.easeInOutCubic,
-        );
-      },
+      onTap: () => setState(() => _currentTabIndex = index),
       behavior: HitTestBehavior.opaque,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 240),
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
         decoration: BoxDecoration(
-          color: isSelected ? activeColor.withOpacity(0.12) : Colors.transparent,
-          borderRadius: BorderRadius.circular(20),
+          color: isSel ? const Color(0xFF00FFA3).withOpacity(0.12) : Colors.transparent,
+          borderRadius: BorderRadius.circular(16),
         ),
         child: Row(
-          mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              color: isSelected ? activeColor : Colors.white.withOpacity(0.4),
-              size: 20,
-            ),
-            if (isSelected) ...[
+            Icon(icon, color: color, size: 19),
+            if (isSel) ...[
               const SizedBox(width: 6),
-              Text(
-                label,
-                style: TextStyle(
-                  color: activeColor,
-                  fontSize: 12,
-                  fontWeight: FontWeight.bold,
-                  letterSpacing: -0.2,
-                ),
-              ),
+              Text(title, style: TextStyle(color: color, fontSize: 12, fontWeight: FontWeight.bold)),
             ]
           ],
         ),
@@ -655,28 +567,15 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "WHITELIST RADAR // РФ",
-                style: TextStyle(fontFamily: 'monospace', fontSize: 12, letterSpacing: 2, color: Colors.white.withOpacity(0.5), fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 4),
-              const Text("Мониторинг сети", style: TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
-            ],
+          Text(
+            "WHITELIST RADAR // РФ",
+            style: TextStyle(fontFamily: 'monospace', fontSize: 12, letterSpacing: 2, color: Colors.white.withOpacity(0.5), fontWeight: FontWeight.bold),
           ),
-          IconButton(
-            onPressed: _syncStatusesWithServer,
-            icon: Container(
-              padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(color: Colors.white.withOpacity(0.05), borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.white.withOpacity(0.1))),
-              child: const Icon(Icons.sync, color: Color(0xFF00FFA3), size: 22),
-            ),
-          ),
+          const SizedBox(height: 4),
+          const Text("Мониторинг сети", style: TextStyle(fontSize: 26, color: Colors.white, fontWeight: FontWeight.w900, letterSpacing: -0.5)),
         ],
       ),
     );
@@ -884,17 +783,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: Text(region.comment, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
-                      ),
-                      if (region.reportsCount24h > 0) ...[
-                        const SizedBox(width: 6),
-                        Text("⚠️ ${region.reportsCount24h} реп.", style: const TextStyle(color: Color(0xFFFF3366), fontSize: 10, fontWeight: FontWeight.bold)),
-                      ]
-                    ],
-                  ),
+                  Text(region.comment, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
                 ],
               ),
             ),
@@ -911,4 +800,68 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+// Векторная география РФ для оффлайн-рендера
+class _OfflineVectorMapPainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final w = size.width;
+    final h = size.height;
+
+    // Сетка
+    final grid = Paint()..color = const Color(0xFF161E2C)..strokeWidth = 1;
+    for (double x = 0; x < w; x += 45) {
+      canvas.drawLine(Offset(x, 0), Offset(x, h), grid);
+    }
+    for (double y = 0; y < h; y += 45) {
+      canvas.drawLine(Offset(0, y), Offset(w, y), grid);
+    }
+
+    // Территория России
+    final p = Path();
+    p.moveTo(w * 0.18, h * 0.36);
+    p.lineTo(w * 0.20, h * 0.26);
+    p.lineTo(w * 0.24, h * 0.18);
+    p.lineTo(w * 0.28, h * 0.22);
+    p.lineTo(w * 0.30, h * 0.28);
+    p.lineTo(w * 0.36, h * 0.20);
+    p.lineTo(w * 0.40, h * 0.14);
+    p.lineTo(w * 0.48, h * 0.15);
+    p.lineTo(w * 0.58, h * 0.20);
+    p.lineTo(w * 0.68, h * 0.22);
+    p.lineTo(w * 0.76, h * 0.18);
+    p.lineTo(w * 0.88, h * 0.20);
+    p.lineTo(w * 0.92, h * 0.30);
+    p.lineTo(w * 0.86, h * 0.42);
+    p.lineTo(w * 0.88, h * 0.56);
+    p.lineTo(w * 0.84, h * 0.62);
+    p.lineTo(w * 0.78, h * 0.52);
+    p.lineTo(w * 0.76, h * 0.66);
+    p.lineTo(w * 0.72, h * 0.72);
+    p.lineTo(w * 0.67, h * 0.64);
+    p.lineTo(w * 0.60, h * 0.63);
+    p.lineTo(w * 0.54, h * 0.68);
+    p.lineTo(w * 0.47, h * 0.69);
+    p.lineTo(w * 0.40, h * 0.66);
+    p.lineTo(w * 0.34, h * 0.62);
+    p.lineTo(w * 0.26, h * 0.61);
+    p.lineTo(w * 0.18, h * 0.70);
+    p.lineTo(w * 0.13, h * 0.65);
+    p.lineTo(w * 0.15, h * 0.52);
+    p.lineTo(w * 0.17, h * 0.42);
+    p.close();
+
+    final land = Paint()..color = const Color(0xFF141C29)..style = PaintingStyle.fill;
+    canvas.drawPath(p, land);
+
+    final border = Paint()
+      ..color = const Color(0xFF00E5FF).withOpacity(0.7)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 1.3;
+    canvas.drawPath(p, border);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
