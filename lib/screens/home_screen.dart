@@ -21,76 +21,170 @@ class _HomeScreenState extends State<HomeScreen> {
   String _selectedDistrict = "ВСЕ";
   bool _showMap = true;
 
-  // Твой настроенный VPS-сервер с работающей админкой:
   final String _serverUrl = "http://64.188.64.121:8080";
 
   @override
   void initState() {
     super.initState();
     _regions = RegionsDatabase.getInitialRegions();
+    _syncStatusesWithServer();
+  }
+
+  Future<void> _syncStatusesWithServer() async {
+    try {
+      final res = await http.get(Uri.parse("$_serverUrl/api/status")).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final Map<String, dynamic> data = jsonDecode(res.body);
+        setState(() {
+          for (final region in _regions) {
+            if (data.containsKey(region.id)) {
+              final info = data[region.id];
+              final statusStr = info["status"];
+              switch (statusStr) {
+                case "normal": region.level = RestrictionLevel.normal; break;
+                case "warning": region.level = RestrictionLevel.warning; break;
+                case "whitelistActive": region.level = RestrictionLevel.whitelistActive; break;
+                case "fullBlackout": region.level = RestrictionLevel.fullBlackout; break;
+              }
+              if (info["comment"] != null) region.comment = info["comment"];
+              if (info["reports_24h"] != null) region.reportsCount24h = info["reports_24h"];
+            }
+          }
+        });
+      }
+    } catch (_) {
+      // Работаем в оффлайне с кэшем
+    }
   }
 
   Color _getStatusColor(RestrictionLevel level) {
     switch (level) {
-      case RestrictionLevel.normal:
-        return const Color(0xFF00FFA3);
-      case RestrictionLevel.warning:
-        return const Color(0xFFFFB800);
-      case RestrictionLevel.whitelistActive:
-        return const Color(0xFFFF3366);
-      case RestrictionLevel.fullBlackout:
-        return const Color(0xFF9D00FF);
+      case RestrictionLevel.normal: return const Color(0xFF00FFA3);
+      case RestrictionLevel.warning: return const Color(0xFFFFB800);
+      case RestrictionLevel.whitelistActive: return const Color(0xFFFF3366);
+      case RestrictionLevel.fullBlackout: return const Color(0xFF9D00FF);
     }
   }
 
   String _getStatusText(RestrictionLevel level) {
     switch (level) {
-      case RestrictionLevel.normal:
-        return "Сеть в норме";
-      case RestrictionLevel.warning:
-        return "Нестабильно";
-      case RestrictionLevel.whitelistActive:
-        return "Белый список";
-      case RestrictionLevel.fullBlackout:
-        return "Блэкаут";
+      case RestrictionLevel.normal: return "Сеть в норме";
+      case RestrictionLevel.warning: return "Нестабильно";
+      case RestrictionLevel.whitelistActive: return "Белый список";
+      case RestrictionLevel.fullBlackout: return "Блэкаут";
     }
   }
 
-  Future<void> _sendReportToServer(RegionInfo region, String city) async {
+  Future<void> _sendReportToServer(RegionInfo region, String chosenCity) async {
     try {
-      final response = await http.post(
+      final res = await http.post(
         Uri.parse("$_serverUrl/api/report"),
         headers: {"Content-Type": "application/json"},
-        body: jsonEncode({
-          "region_id": region.id,
-          "city": city,
-        }),
+        body: jsonEncode({"region_id": region.id, "city": chosenCity}),
       ).timeout(const Duration(seconds: 4));
 
       if (!mounted) return;
 
-      if (response.statusCode == 200) {
+      if (res.statusCode == 200) {
+        setState(() {
+          region.reportsCount24h++;
+        });
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             backgroundColor: const Color(0xFF00FFA3),
-            content: Text(
-              "Жалоба по г. $city отправлена на сервер!",
-              style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-            ),
+            content: Text("Жалоба по г. $chosenCity зафиксирована на сервере!", style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold)),
           ),
         );
-      } else {
-        throw Exception("Server returned ${response.statusCode}");
       }
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           backgroundColor: const Color(0xFF1E2638),
-          content: Text("Сервер временно недоступен. Жалоба по г. $city сохранена в оффлайн-буфер."),
+          content: Text("Сервер под глушилкой недоступен. Жалоба по г. $chosenCity сохранена локально."),
         ),
       );
     }
+  }
+
+  void _showReportDialog(RegionInfo region, String? defaultCity) {
+    String selectedCity = defaultCity ?? (region.cities.isNotEmpty ? region.cities.first : region.name);
+    final customController = TextEditingController();
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          backgroundColor: const Color(0xFF131A26),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20), side: const BorderSide(color: Colors.white12)),
+          title: Text("Жалоба: ${region.name}", style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          content: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text("Выберите город или населённый пункт:", style: TextStyle(color: Colors.white70, fontSize: 13)),
+                const SizedBox(height: 10),
+                DropdownButtonFormField<String>(
+                  value: region.cities.contains(selectedCity) ? selectedCity : null,
+                  dropdownColor: const Color(0xFF1B2433),
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  decoration: InputDecoration(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.04),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                  hint: const Text("Выбрать из списка", style: TextStyle(color: Colors.white38)),
+                  items: region.cities.map((c) => DropdownMenuItem(value: c, child: Text(c))).toList(),
+                  onChanged: (val) {
+                    if (val != null) {
+                      setDialogState(() {
+                        selectedCity = val;
+                        customController.clear();
+                      });
+                    }
+                  },
+                ),
+                const SizedBox(height: 12),
+                const Text("Или введите свой посёлок вручную:", style: TextStyle(color: Colors.white54, fontSize: 12)),
+                const SizedBox(height: 6),
+                TextField(
+                  controller: customController,
+                  style: const TextStyle(color: Colors.white, fontSize: 13),
+                  onChanged: (val) {
+                    if (val.trim().isNotEmpty) {
+                      selectedCity = val.trim();
+                    }
+                  },
+                  decoration: InputDecoration(
+                    hintText: "Например: Кубинка, Голицыно, Софрино...",
+                    hintStyle: const TextStyle(color: Colors.white24, fontSize: 13),
+                    filled: true,
+                    fillColor: Colors.white.withOpacity(0.04),
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx),
+              child: const Text("Отмена", style: TextStyle(color: Colors.white54)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFFF3366), foregroundColor: Colors.white),
+              onPressed: () {
+                Navigator.pop(ctx);
+                _sendReportToServer(region, selectedCity);
+              },
+              child: const Text("Отправить репорт"),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _showRegionDetailModal(RegionInfo region, {String? matchedCity}) {
@@ -100,8 +194,6 @@ class _HomeScreenState extends State<HomeScreen> {
       isScrollControlled: true,
       builder: (context) {
         final color = _getStatusColor(region.level);
-        final currentCity = matchedCity ?? (region.cities.isNotEmpty ? region.cities.first : region.name);
-
         return BackdropFilter(
           filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
           child: Container(
@@ -116,11 +208,7 @@ class _HomeScreenState extends State<HomeScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
-                  ),
+                  child: Container(width: 40, height: 4, decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10))),
                 ),
                 const SizedBox(height: 20),
                 Row(
@@ -132,10 +220,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         borderRadius: BorderRadius.circular(10),
                         border: Border.all(color: color.withOpacity(0.4)),
                       ),
-                      child: Text(
-                        "РЕГИОН ${region.id}",
-                        style: TextStyle(color: color, fontWeight: FontWeight.w900, fontFamily: 'monospace'),
-                      ),
+                      child: Text("РЕГИОН ${region.id}", style: TextStyle(color: color, fontWeight: FontWeight.w900, fontFamily: 'monospace')),
                     ),
                     const Spacer(),
                     Container(
@@ -151,11 +236,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   style: const TextStyle(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white),
                 ),
                 const SizedBox(height: 6),
-                Text(
-                  "Округ: ${region.federalDistrict}",
-                  style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13),
-                ),
-                const SizedBox(height: 16),
+                Text("Группа: ${region.federalDistrict}", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
+                const SizedBox(height: 12),
+                // Информационная карточка с числом жалоб
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
@@ -163,21 +246,31 @@ class _HomeScreenState extends State<HomeScreen> {
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(color: Colors.white.withOpacity(0.06)),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
-                      Icon(Icons.info_outline, color: color, size: 20),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          region.comment,
-                          style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3),
-                        ),
+                      Row(
+                        children: [
+                          Icon(Icons.info_outline, color: color, size: 20),
+                          const SizedBox(width: 12),
+                          Expanded(child: Text(region.comment, style: const TextStyle(color: Colors.white, fontSize: 13, height: 1.3))),
+                        ],
+                      ),
+                      const SizedBox(height: 10),
+                      Row(
+                        children: [
+                          const Icon(Icons.people_outline, color: Color(0xFF00E5FF), size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            "Жалоб пользователей за 24ч: ${region.reportsCount24h}",
+                            style: const TextStyle(color: Color(0xFF00E5FF), fontSize: 12, fontWeight: FontWeight.bold),
+                          ),
+                        ],
                       ),
                     ],
                   ),
                 ),
                 const SizedBox(height: 16),
-                const Text("Населенные пункты в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
+                const Text("Населённые пункты региона в базе:", style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold)),
                 const SizedBox(height: 8),
                 Wrap(
                   spacing: 6,
@@ -209,10 +302,10 @@ class _HomeScreenState extends State<HomeScreen> {
                   child: ElevatedButton.icon(
                     onPressed: () {
                       Navigator.pop(context);
-                      _sendReportToServer(region, currentCity);
+                      _showReportDialog(region, matchedCity);
                     },
                     icon: const Icon(Icons.warning_amber_rounded, size: 18),
-                    label: Text("Сообщить о белом списке в $currentCity", style: const TextStyle(fontWeight: FontWeight.bold)),
+                    label: const Text("Сообщить о белом списке (Выбрать город)", style: TextStyle(fontWeight: FontWeight.bold)),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: const Color(0xFFFF3366).withOpacity(0.2),
                       foregroundColor: const Color(0xFFFF3366),
@@ -223,90 +316,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  void _showProbesSheet(NetworkDetectorService detector) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: Colors.transparent,
-      isScrollControlled: true,
-      builder: (context) {
-        return BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-          child: Container(
-            padding: const EdgeInsets.all(24),
-            decoration: BoxDecoration(
-              color: const Color(0xFF111622).withOpacity(0.95),
-              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-              border: Border.all(color: Colors.white12),
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(10)),
-                  ),
-                ),
-                const SizedBox(height: 18),
-                const Text("Матрица доступности шлюзов", style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.white)),
-                const SizedBox(height: 6),
-                Text("Тестирование сквозного трафика и DPI", style: TextStyle(color: Colors.white.withOpacity(0.5), fontSize: 13)),
-                const SizedBox(height: 16),
-                ...detector.probes.map((probe) {
-                  return Container(
-                    margin: const EdgeInsets.only(bottom: 8),
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withOpacity(0.03),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white.withOpacity(0.06)),
-                    ),
-                    child: Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(probe.name, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                            Text(probe.isWhitelistExpected ? "Пул белого списка РФ" : "Внешний глобальный узел", style: TextStyle(color: Colors.white38, fontSize: 11)),
-                          ],
-                        ),
-                        Row(
-                          children: [
-                            if (probe.latencyMs != null)
-                              Text("${probe.latencyMs} ms  ", style: const TextStyle(color: Colors.white54, fontSize: 11, fontFamily: 'monospace')),
-                            Container(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                              decoration: BoxDecoration(
-                                color: (probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366)).withOpacity(0.15),
-                                borderRadius: BorderRadius.circular(6),
-                              ),
-                              child: Text(
-                                probe.isReachable ? "OK" : "BLOCKED",
-                                style: TextStyle(
-                                  color: probe.isReachable ? const Color(0xFF00FFA3) : const Color(0xFFFF3366),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ),
-                          ],
-                        )
-                      ],
-                    ),
-                  );
-                }),
                 const SizedBox(height: 16),
               ],
             ),
@@ -355,7 +364,7 @@ class _HomeScreenState extends State<HomeScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _buildHeader(detector),
+                _buildHeader(),
                 _buildStatusBanner(detector),
                 _buildSearchAndFilters(),
                 if (_showMap && _searchQuery.isEmpty)
@@ -369,7 +378,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        _searchQuery.isNotEmpty ? "РЕЗУЛЬТАТЫ ПОИСКА (${filtered.length})" : "РЕГИОНЫ И ГОРОДА",
+                        _searchQuery.isNotEmpty ? "РЕЗУЛЬТАТЫ (${filtered.length})" : "РЕГИОНЫ И ГОРОДА",
                         style: TextStyle(fontFamily: 'monospace', fontSize: 11, color: Colors.white.withOpacity(0.4), letterSpacing: 1),
                       ),
                       GestureDetector(
@@ -409,7 +418,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  Widget _buildHeader(NetworkDetectorService detector) {
+  Widget _buildHeader() {
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
       child: Row(
@@ -436,7 +445,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
           IconButton(
-            onPressed: () => _showProbesSheet(detector),
+            onPressed: _syncStatusesWithServer,
             icon: Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(
@@ -444,7 +453,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 borderRadius: BorderRadius.circular(12),
                 border: Border.all(color: Colors.white.withOpacity(0.1)),
               ),
-              child: const Icon(Icons.radar_outlined, color: Color(0xFF00FFA3), size: 22),
+              child: const Icon(Icons.sync, color: Color(0xFF00FFA3), size: 22),
             ),
           ),
         ],
@@ -482,20 +491,13 @@ class _HomeScreenState extends State<HomeScreen> {
                           decoration: BoxDecoration(
                             shape: BoxShape.circle,
                             color: statusColor,
-                            boxShadow: [
-                              BoxShadow(color: statusColor.withOpacity(0.6), blurRadius: 8, spreadRadius: 2),
-                            ],
+                            boxShadow: [BoxShadow(color: statusColor.withOpacity(0.6), blurRadius: 8, spreadRadius: 2)],
                           ),
                         ),
                         const SizedBox(width: 8),
                         Text(
                           "МОЯ ТОЧКА ПОДКЛЮЧЕНИЯ:",
-                          style: TextStyle(
-                            fontFamily: 'monospace',
-                            fontSize: 10,
-                            color: Colors.white.withOpacity(0.6),
-                            letterSpacing: 1,
-                          ),
+                          style: TextStyle(fontFamily: 'monospace', fontSize: 10, color: Colors.white.withOpacity(0.6), letterSpacing: 1),
                         ),
                       ],
                     ),
@@ -506,10 +508,7 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ),
                 const SizedBox(height: 8),
-                Text(
-                  detector.diagnostics,
-                  style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600),
-                ),
+                Text(detector.diagnostics, style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w600)),
                 const SizedBox(height: 12),
                 SizedBox(
                   width: double.infinity,
@@ -526,11 +525,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ),
                     ),
                     child: detector.isChecking
-                        ? const SizedBox(
-                            width: 16,
-                            height: 16,
-                            child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                          )
+                        ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
                         : const Row(
                             mainAxisAlignment: MainAxisAlignment.center,
                             children: [
@@ -552,9 +547,10 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget _buildSearchAndFilters() {
     final districts = [
       "ВСЕ",
-      "Центр (Москва/МО)",
+      "Москва и Подмосковье",
+      "Черноземье и Приграничье",
       "Северо-Запад (СПб)",
-      "Юг",
+      "Юг и Кавказ",
       "Поволжье",
       "Урал",
       "Сибирь",
@@ -658,10 +654,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 children: [
                   Row(
                     children: [
-                      Text(
-                        region.name,
-                        style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
-                      ),
+                      Text(region.name, style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
                       if (matchedCity != null) ...[
                         const SizedBox(width: 6),
                         Container(
@@ -669,15 +662,20 @@ class _HomeScreenState extends State<HomeScreen> {
                           decoration: BoxDecoration(color: const Color(0xFF0075FF).withOpacity(0.2), borderRadius: BorderRadius.circular(4)),
                           child: Text("г. $matchedCity", style: const TextStyle(color: Color(0xFF64B5F6), fontSize: 10, fontWeight: FontWeight.bold)),
                         )
-                      ]
+                      ],
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text(
-                    region.comment,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(region.comment, maxLines: 1, overflow: TextOverflow.ellipsis, style: TextStyle(color: Colors.white.withOpacity(0.45), fontSize: 11)),
+                      ),
+                      if (region.reportsCount24h > 0) ...[
+                        const SizedBox(width: 6),
+                        Text("⚠️ ${region.reportsCount24h} реп.", style: const TextStyle(color: Color(0xFFFF3366), fontSize: 10, fontWeight: FontWeight.bold)),
+                      ]
+                    ],
                   ),
                 ],
               ),
