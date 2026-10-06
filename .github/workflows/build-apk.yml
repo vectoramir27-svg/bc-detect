@@ -36,15 +36,21 @@ jobs:
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      # Включаем core library desugaring для flutter_local_notifications
+      # Настраиваем разрешения и desugaring с поддержкой build.gradle.kts
       - name: Enable Core Library Desugaring & Permissions
         run: |
           echo "android.builder.sdkDownload=false" >> android/gradle.properties
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' android/app/src/main/AndroidManifest.xml
           
-          # Настраиваем desugaring в android/app/build.gradle
-          sed -i 's/compileOptions {/compileOptions {\n        coreLibraryDesugaringEnabled true/' android/app/build.gradle
-          sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"/' android/app/build.gradle
+          if [ -f "android/app/build.gradle.kts" ]; then
+            echo "Configuring Kotlin DSL (build.gradle.kts)..."
+            sed -i '/compileOptions {/a \        isCoreLibraryDesugaringEnabled = true' android/app/build.gradle.kts
+            sed -i '/dependencies {/a \    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")' android/app/build.gradle.kts
+          elif [ -f "android/app/build.gradle" ]; then
+            echo "Configuring Groovy (build.gradle)..."
+            sed -i '/compileOptions {/a \        coreLibraryDesugaringEnabled true' android/app/build.gradle
+            sed -i '/dependencies {/a \    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"' android/app/build.gradle
+          fi
 
       - name: Install dependencies
         run: flutter pub get
