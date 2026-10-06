@@ -28,22 +28,37 @@ jobs:
           channel: 'stable'
           cache: true
 
-      - name: Verify Flutter version
-        run: flutter --version
+      - name: Install ImageMagick for Icons
+        run: sudo apt-get update && sudo apt-get install -y imagemagick
 
-      # Генерируем чистый актуальный Android v2 embedding проект
       - name: Recreate Android platform with v2 embedding
         run: |
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      # Добавляем разрешение на доступ в интернет в свежесозданный Manifest
       - name: Add Internet permission to AndroidManifest
         run: |
           sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Install dependencies
         run: flutter pub get
+
+      # Принудительно генерируем иконки всех размеров из assets/logo.png
+      - name: Apply Custom App Logo to Android Resources
+        run: |
+          if [ -f "assets/logo.png" ]; then
+            echo "Generating Android launcher icons from assets/logo.png..."
+            RES_DIR="android/app/src/main/res"
+            mkdir -p $RES_DIR/mipmap-mdpi $RES_DIR/mipmap-hdpi $RES_DIR/mipmap-xhdpi $RES_DIR/mipmap-xxhdpi $RES_DIR/mipmap-xxxhdpi
+            convert assets/logo.png -resize 48x48 $RES_DIR/mipmap-mdpi/ic_launcher.png
+            convert assets/logo.png -resize 72x72 $RES_DIR/mipmap-hdpi/ic_launcher.png
+            convert assets/logo.png -resize 96x96 $RES_DIR/mipmap-xhdpi/ic_launcher.png
+            convert assets/logo.png -resize 144x144 $RES_DIR/mipmap-xxhdpi/ic_launcher.png
+            convert assets/logo.png -resize 192x192 $RES_DIR/mipmap-xxxhdpi/ic_launcher.png
+            echo "Icons applied successfully!"
+          else
+            echo "assets/logo.png not found. Using default icon."
+          fi
 
       - name: Build Android Release APK
         run: flutter build apk --release
