@@ -5,6 +5,8 @@ class RegionInfo {
   final String name;
   final String shortCode;
   final String federalDistrict;
+  final double latitude;
+  final double longitude;
   RestrictionLevel level;
   DateTime lastChecked;
   String comment;
@@ -16,6 +18,8 @@ class RegionInfo {
     required this.name,
     required this.shortCode,
     required this.federalDistrict,
+    required this.latitude,
+    required this.longitude,
     this.level = RestrictionLevel.normal,
     required this.lastChecked,
     this.comment = "Сеть работает штатно",
