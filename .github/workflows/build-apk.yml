@@ -36,11 +36,15 @@ jobs:
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      # Отключаем ненужный NDK, чтобы Gradle не качал 1.5 ГБ
-      - name: Configure Android Gradle (Disable NDK download)
+      # Включаем core library desugaring для flutter_local_notifications
+      - name: Enable Core Library Desugaring & Permissions
         run: |
           echo "android.builder.sdkDownload=false" >> android/gradle.properties
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' android/app/src/main/AndroidManifest.xml
+          
+          # Настраиваем desugaring в android/app/build.gradle
+          sed -i 's/compileOptions {/compileOptions {\n        coreLibraryDesugaringEnabled true/' android/app/build.gradle
+          sed -i 's/dependencies {/dependencies {\n    coreLibraryDesugaring "com.android.tools:desugar_jdk_libs:2.0.4"/' android/app/build.gradle
 
       - name: Install dependencies
         run: flutter pub get
@@ -61,7 +65,6 @@ jobs:
             echo "assets/logo.png not found. Using default icon."
           fi
 
-      # Собираем сразу без затягивания NDK
       - name: Build Android Release APK
         run: flutter build apk --release --no-tree-shake-icons
 
