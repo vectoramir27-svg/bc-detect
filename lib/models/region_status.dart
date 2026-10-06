@@ -1,17 +1,5 @@
 enum RestrictionLevel { normal, warning, whitelistActive, fullBlackout }
 
-class CityItem {
-  final String name;
-  final String regionId;
-  final String regionName;
-
-  const CityItem({
-    required this.name,
-    required this.regionId,
-    required this.regionName,
-  });
-}
-
 class RegionInfo {
   final String id;
   final String name;
@@ -20,6 +8,7 @@ class RegionInfo {
   RestrictionLevel level;
   DateTime lastChecked;
   String comment;
+  int reportsCount24h;
   final List<String> cities;
 
   RegionInfo({
@@ -30,6 +19,7 @@ class RegionInfo {
     this.level = RestrictionLevel.normal,
     required this.lastChecked,
     this.comment = "Сеть работает штатно",
+    this.reportsCount24h = 0,
     this.cities = const [],
   });
 }
