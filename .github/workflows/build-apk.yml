@@ -36,33 +36,9 @@ jobs:
           rm -rf android/
           flutter create . --platforms=android --org com.wonderfultech.netmonitor
 
-      # Гарантированное добавление coreLibraryDesugaring в Kotlin DSL
-      - name: Configure Android Permissions and Desugaring
+      - name: Add Internet permissions
         run: |
-          echo "android.builder.sdkDownload=false" >> android/gradle.properties
-          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>' android/app/src/main/AndroidManifest.xml
-
-          if [ -f "android/app/build.gradle.kts" ]; then
-            echo "Patching build.gradle.kts..."
-            # Включаем флаг в compileOptions
-            sed -i '/compileOptions {/a \        isCoreLibraryDesugaringEnabled = true' android/app/build.gradle.kts
-            # Дописываем гарантированный блок dependencies в самый конец файла
-            cat << 'EOF' >> android/app/build.gradle.kts
-
-dependencies {
-    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
-}
-EOF
-          elif [ -f "android/app/build.gradle" ]; then
-            echo "Patching build.gradle..."
-            sed -i '/compileOptions {/a \        coreLibraryDesugaringEnabled true' android/app/build.gradle
-            cat << 'EOF' >> android/app/build.gradle
-
-dependencies {
-    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.0.4'
-}
-EOF
-          fi
+          sed -i '/<application/i \    <uses-permission android:name="android.permission.INTERNET"/>\n    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE"/>' android/app/src/main/AndroidManifest.xml
 
       - name: Install dependencies
         run: flutter pub get
@@ -79,8 +55,6 @@ EOF
             convert assets/logo.png -resize 144x144 $RES_DIR/mipmap-xxhdpi/ic_launcher.png
             convert assets/logo.png -resize 192x192 $RES_DIR/mipmap-xxxhdpi/ic_launcher.png
             echo "Icons applied successfully!"
-          else
-            echo "assets/logo.png not found. Using default icon."
           fi
 
       - name: Build Android Release APK
